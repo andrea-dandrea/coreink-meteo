@@ -80,10 +80,12 @@ String aprs_build_weather_packet(const char* callsign, int ssid,
                                   char symbolTable, char symbolCode,
                                   float temp_c, float humidity,
                                   float pressure_hpa) {
-    // Ottenere timestamp UTC
+    // Ottenere timestamp UTC (APRS richiede UTC con suffisso 'z')
+    time_t now = time(nullptr);
     struct tm timeinfo;
+    gmtime_r(&now, &timeinfo);
     char timestamp[8];
-    if (getLocalTime(&timeinfo)) {
+    if (now > 100000) {  // NTP sincronizzato
         snprintf(timestamp, sizeof(timestamp), "%02d%02d%02dz",
                  timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min);
     } else {

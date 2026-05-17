@@ -1,6 +1,9 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// === Versione firmware ===
+#define FW_VERSION "1.3"
+
 // === Reti WiFi memorizzate (si connette alla prima disponibile) ===
 struct WiFiAP {
     const char* ssid;
@@ -32,6 +35,9 @@ const WiFiAP wifiNetworks[NUM_WIFI_APS] = {
 
 // === Profili stazione (selezionabili al boot con i pulsanti) ===
 // Ogni profilo ha: nominativo, SSID APRS, passcode, etichetta, simbolo APRS
+// Timezone POSIX: gestisce automaticamente ora legale/solare
+// Italia: CET-1CEST,M3.5.0,M10.5.0/3 (UTC+1 inverno, UTC+2 estate)
+// UK: GMT0BST,M3.5.0/1,M10.5.0  |  UTC puro: UTC0
 struct StationProfile {
     const char* callsign;
     int ssid;
@@ -39,24 +45,33 @@ struct StationProfile {
     const char* label;            // Etichetta mostrata sul display
     char symbolTable;             // Tabella simbolo: '/' o '\\'
     char symbolCode;              // Codice simbolo (es. '_' per WX)
+    const char* timezone;         // Timezone POSIX per ora locale display
 };
 
 #define NUM_PROFILES 3
 
 const StationProfile profiles[NUM_PROFILES] = {
-    { "NOCALL",  13, "-1", "Meteo casa", '/', '_' },   // WX standard
-    { "NOCALL",  9,  "-1", "Mobile",     '/', '_' },   // WX standard
-    { "NOCALL",  13, "-1", "Remota",    '\\', '_' },   // WX verde
+    { "NOCALL",  13, "-1", "Meteo casa", '/', '_', "CET-1CEST,M3.5.0,M10.5.0/3" },
+    { "NOCALL",  9,  "-1", "Mobile",     '/', '_', "CET-1CEST,M3.5.0,M10.5.0/3" },
+    { "NOCALL",  13, "-1", "Remota",    '\\', '_', "CET-1CEST,M3.5.0,M10.5.0/3" },
 };
 
 // === Posizione della stazione (locatore Maidenhead) ===
 #define STATION_LOCATOR "JN61fw"  // Locatore Maidenhead (4 o 6 caratteri)
 
-// === GPS (opzionale) ===
-// Se abilitato e con fix valido, le coordinate GPS sovrascrivono il locatore.
-#define GPS_ENABLED 0             // 1 = GPS abilitato, 0 = disabilitato
-#define GPS_RX_PIN 26             // Pin RX della seriale GPS
-#define GPS_TX_PIN 0              // Pin TX della seriale GPS
+// === Modalità PORT A (GPIO 32/33) ===
+// Il CoreInk ha un solo PORT esterno. Va configurato in base al modulo collegato:
+//   0 = ENV III (I2C): SDA=32, SCL=33 → sensori SHT30 + QMP6988
+//   1 = GPS (UART):    RX=33, TX=32   → modulo AT6558
+// Selezionabile anche al boot tramite menu, salvato in NVS.
+#define PORT_MODE_ENV  0
+#define PORT_MODE_GPS  1
+#define PORT_MODE_DEFAULT PORT_MODE_ENV  // Default al primo avvio
+
+// === GPS ===
+// Attivo solo se PORT_MODE = GPS (selezionato al boot o da NVS)
+#define GPS_RX_PIN 33             // Pin RX ESP32 ← TX GPS (Grove bianco)
+#define GPS_TX_PIN 32             // Pin TX ESP32 → RX GPS (Grove giallo)
 #define GPS_BAUD 9600             // Baud rate del modulo GPS
 
 // === SmartBeaconing (attivo solo con GPS abilitato) ===
@@ -69,6 +84,19 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define SB_TURN_MIN_ANGLE 30      // Angolo minimo (gradi) per trigger svolta
 #define SB_TURN_SLOPE 240         // Slope: angolo/velocità per trigger
 #define SB_TURN_TIME 15           // Tempo minimo (sec) tra beacon per svolta
+
+// === OTA (Over-The-Air update) ===
+// Abilita aggiornamento firmware via WiFi (ArduinoOTA + Web upload).
+// Una volta flashato con OTA attivo, non serve più la porta USB.
+#define OTA_ENABLED 1             // 1 = OTA abilitato, 0 = disabilitato
+#define OTA_HOSTNAME "coreink-meteo"
+#define OTA_PASSWORD ""           // Lasciare vuoto per nessuna password
+#define OTA_WEB_PORT 8080         // Porta per la pagina web di upload firmware
+
+// === BLE OTA (firmware via Bluetooth) ===
+// Usa un servizio GATT per ricevere il firmware in chunk da telefono (nRF Connect)
+// o app custom. Funziona anche senza WiFi.
+#define BLE_OTA_ENABLED 1         // 1 = BLE OTA abilitato, 0 = disabilitato
 
 // === Bluetooth (BLE) ===
 // WiFi e BLE funzionano in parallelo sull'ESP32 (time-division multiplexing).
@@ -96,5 +124,47 @@ const StationProfile profiles[NUM_PROFILES] = {
 
 // === Display ===
 #define DISPLAY_UPDATE_MS 60000   // Aggiornare il display ogni minuto
+#define NUM_PAGES 9               // Numero totale di pagine display
+
+// === Batteria ===
+#define BAT_ADC_SAMPLES 5         // Media mobile su N campioni
+
+// === Buzzer ===
+#define BUZZER_PIN 2              // GPIO buzzer passivo
+#define BUZZER_DEFAULT_VOLUME 50  // Duty cycle PWM default (0-100)
+
+// === APRS Status ===
+#define APRS_STATUS_DEFAULT "CoreInk-Meteo v" FW_VERSION " by EA5JDG/IZ3ARR"
+#define APRS_STATUS_INTERVAL_MS 1800000  // 30 minuti
+
+// === Data Logger ===
+#define LOG_RECORD_SIZE 30        // Bytes per record
+#define LOG_DEFAULT_INTERVAL 600  // Secondi (10 min)
+#define LOG_MAGIC "CMRK"          // Magic header file
+
+// === OpenWeatherMap ===
+#define OWM_DEFAULT_INTERVAL 30   // Minuti tra aggiornamenti
+
+// === NVS Keys aggiuntive v1.3 ===
+#define NVS_KEY_PORT_MODE "port_mode"
+#define NVS_KEY_SYMBOL "aprs_sym"
+#define NVS_KEY_WIFI_ENABLED "wifi_en"
+#define NVS_KEY_WIFI_ON_BOOT "wifi_boot"
+#define NVS_KEY_BT_ENABLED "bt_en"
+#define NVS_KEY_BT_ON_BOOT "bt_boot"
+#define NVS_KEY_BUZZER_ENABLED "buzz_en"
+#define NVS_KEY_BUZZER_VOLUME "buzz_vol"
+#define NVS_KEY_BOOT_MELODY "boot_mel"
+#define NVS_KEY_LED_ENABLED "led_en"
+#define NVS_KEY_LOG_ENABLED "log_en"
+#define NVS_KEY_LOG_INTERVAL "log_intv"
+#define NVS_KEY_LOG_QUAL_TYPE "log_qual"
+#define NVS_KEY_BAT_SAMPLES "bat_samp"
+#define NVS_KEY_APRS_STATUS "aprs_stat"
+#define NVS_KEY_STATUS_INTERVAL "stat_intv"
+#define NVS_KEY_OWM_KEY "owm_key"
+#define NVS_KEY_OWM_INTERVAL "owm_intv"
+#define NVS_KEY_TIDE_KEY "tide_key"
+#define NVS_KEY_TIDE_PORT "tide_port"
 
 #endif

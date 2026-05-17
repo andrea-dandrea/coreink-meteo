@@ -1,0 +1,41 @@
+MIT License
+
+Copyright (c) 2026 ADAsoft — Andrea D'Andrea
+
+Design e architettura: Andrea D'Andrea (IZ3ARR)
+Codice sorgente:       Claude
+Verifica e validazione: Andrea D'Andrea (EA5JDG)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Third-party libraries used by this project and their respective licenses:
+
+- M5Core-Ink        © M5Stack                  MIT License
+- M5GFX             © M5Stack                  MIT License
+- M5StickCPlus2     © M5Stack                  MIT License
+- M5Unit-ENV        © M5Stack                  MIT License
+- TinyGPSPlus       © Mikal Hart               GNU LGPL v2.1
+- WiFiManager       © tzapu                    MIT License
+- ESP32 Arduino     © Espressif Systems        GNU LGPL v2.1 / Apache 2.0
+- NOAA Solar Calc   © U.S. NOAA / ESRL         Public Domain
+
+Full license texts for each library are available in their respective
+repositories listed in platformio.ini.
