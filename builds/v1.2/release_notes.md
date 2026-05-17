@@ -26,9 +26,9 @@ Correzione caricamento parametri da NVS e miglioramenti display.
 
 ### File binari
 
-| File | Note |
-|------|------|
-| — | Firmware in esecuzione sul dispositivo (dump non ancora effettuato) |
+| File | Dimensione | Note |
+|------|-----------|------|
+| `firmware_coreink_v1.2_dump.bin` | 1.966.080 byte | Dump flash app0 (0x10000–0x1F0000) tramite esptool, USB, 115200 baud |
 
 ---
 

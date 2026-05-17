@@ -2,7 +2,31 @@
 
 ---
 
-## v1.2 — Fix NVS e versione FW (2026-05-17)
+## v1.3 — Moduli avanzati (2026-05-17)
+
+Aggiunta di sei nuovi moduli e schema partizioni custom.
+
+### Nuovi moduli
+- `buzzer.h/cpp`: 10 eventi sonori, 6 melodie boot, PWM
+- `led_status.h/cpp`: 4 stati LED + flash TX
+- `data_logger.h/cpp`: ring buffer LittleFS, CSV via WebServer `/data`
+- `gps_extra.h/cpp`: parser GSV multi-costellazione (GPS+BeiDou+GLONASS)
+- `astro.h/cpp`: algoritmo solare NOAA, fase lunare
+- `ble_ota.h/cpp`: BLE OTA indipendente da `BLE_ENABLED`
+
+### Infrastruttura
+- Schema partizioni custom `coreink_partitions.csv`: app 1.938 MB (+64 KB), LittleFS 64 KB
+- Margine OTA ~88 KB rispetto a v1.3 (4.4%)
+
+### Funzionalità
+- 9 pagine display, runtime port switching ENV/GPS
+- WiFiManager esteso con tutti i parametri configurabili
+- Simbolo APRS configurabile a runtime, guard `canTx`
+- Coordinate alternanti Maidenhead ↔ lat/lon, APRS Status packet ogni 30 min
+- Batteria media mobile, WiFi auto-reconnect, SmartBeaconing GPS
+
+---
+
 
 Correzione caricamento parametri da NVS e miglioramenti display.
 

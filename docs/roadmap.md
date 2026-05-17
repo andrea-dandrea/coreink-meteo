@@ -8,6 +8,109 @@
 | v1.0 | Stazione meteo APRS completa | 2026-05-05 |
 | v1.1 | OTA WiFi + BLE + WiFiManager | 2026-05-16 |
 | v1.2 | Fix NVS callsign/locator, versione FW a schermo | 2026-05-17 |
+| v1.3 | Moduli avanzati: buzzer, LED, data logger, GPS+, astro, BLE OTA, partizioni custom | 2026-05-17 |
+
+---
+
+## v1.4 — Versione finale 1.x: prodotto completo e stabile
+
+La v1.4 chiude il ciclo della versione principale 1. Al termine di questa versione
+la stazione meteorologica è un prodotto completo, affidabile e ben documentato.
+Le versioni successive (v2.x) introdurranno funzionalità di salto qualitativo.
+
+### Bugfix da v1.3
+*Da definire durante i test della v1.3. Questa sezione verrà aggiornata.*
+
+- [ ] TBD — in attesa di sessione di test completa v1.3
+
+### Infrastruttura e affidabilità
+
+- Protezione pre-OTA: la pagina `/update` verifica la presenza di log e richiede
+  download o conferma esplicita prima di accettare il firmware
+- Gestione errori di rete migliorata: riconnessione automatica, timeout, retry con backoff
+- Verifica stabilità multi-giorno
+
+### Miglioramenti interfaccia
+
+- Font selezionabile dall'utente (diversi stili e dimensioni: 8/12/16/24 px)
+- Configurazione font dal portale web / WiFiManager
+- Libreria font estesa (monospace, sans-serif)
+
+### Documentazione (obiettivo principale v1.4)
+
+- **README.md** → riscritto in inglese
+- **docs/release_notes.md** → riscritto in inglese
+- **builds/v1.4/release_notes.md** → inglese
+- **docs/manuale_utente.md** → revisione e pulizia (italiano)
+- Rimozione di tutti i riferimenti a workaround hardware specifici
+- Traduzione opzionale manuale utente in inglese (`docs/user_manual_en.md`)
+  per condivisione con la comunità internazionale
+
+---
+
+## v2.0 — Espansione hardware, radio e connettività
+
+Salto qualitativo dell'applicazione: nuovi hardware, nuove reti, nuove funzionalità
+che trasformano la stazione in un nodo della rete APRS e delle reti meteo globali.
+L'intero contenuto di questa versione può essere rilasciato come v2.0 e poi
+raffinato con calma nelle versioni 2.1, 2.2 ecc.
+
+### Sensori esterni wireless RF433
+
+- Ricezione dati da sensori meteo wireless 433 MHz (Oregon Scientific, Acurite, ecc.)
+- Decodifica protocolli comuni (temperatura, umidità, pioggia esterna)
+- Sensore effetto Hall per anemometro o pluviometro
+- Integrazione dati nel pacchetto APRS weather report
+- Hardware: M5Stack RF433R, Hall Effect Unit, Hub Grove 1→3
+
+### iGate / Digipeater LoRa
+
+- Ricezione pacchetti APRS via LoRa (430 MHz)
+- Inoltro a APRS-IS (iGate RX)
+- Digipeater locale (ripetizione senza internet)
+- Filtro pacchetti per area/nominativo
+- Visualizzazione stazioni ascoltate su display
+- Hardware: RA-01 (SX1278) SPI o E32-433T UART
+
+### Integrazione reti meteo alternative
+
+- **CWOP** (Citizen Weather Observer Program): invio dati a cwop.aprs.net:14580, registrazione CW/DW number
+- **Weather Underground**: upload HTTP/HTTPS a wunderground.com, API key + station ID via WiFiManager
+- **MADIS/NOAA**: inoltro automatico verso il sistema MADIS tramite CWOP
+- **PWSweather / AerisWeather**: upload dati via API REST
+- **OpenWeatherMap Station API**: invio dati alla propria stazione OWM registrata
+- **Windy.com**: upload via API stations (station ID + API key)
+- **MQTT broker custom**: pubblicazione dati su topic configurabile (Home Assistant, Node-RED, Grafana)
+- Selezione reti attive da WiFiManager (checkbox per ogni rete)
+- Credenziali e ID stazione per ogni rete salvati in NVS
+- Invio simultaneo multi-rete con intervalli indipendenti
+
+### Ordine di implementazione suggerito
+
+1. RF433 — estende la funzione meteo principale, impatto hardware limitato
+2. Multi-rete meteo — estende la connettività, solo software
+3. LoRa iGate/Digipeater — maggiore complessità hardware, impatto su flash e RAM
+
+---
+
+## Idee future (non pianificate)
+
+- App BLE per configurazione da smartphone
+- Sensori aggiuntivi I2C (UV, luminosità)
+- Deep sleep con wake-up RTC per risparmio estremo
+- Dashboard web locale con grafici storici
+- Integrazione MQTT in parallelo ad APRS
+- Supporto multi-lingua interfaccia display
+
+
+## Versioni rilasciate
+
+| Versione | Descrizione | Data |
+|----------|-------------|------|
+| v0.1 | Prototipo iniziale | 2026-05-01 |
+| v1.0 | Stazione meteo APRS completa | 2026-05-05 |
+| v1.1 | OTA WiFi + BLE + WiFiManager | 2026-05-16 |
+| v1.2 | Fix NVS callsign/locator, versione FW a schermo | 2026-05-17 |
 
 ### Bug noti v1.2
 - Locator Maidenhead troncato a 7 caratteri (buffer troppo piccolo, max 8+ per locator esteso)

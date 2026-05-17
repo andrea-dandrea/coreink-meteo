@@ -1,0 +1,18 @@
+# CoreInk Meteo — custom partition table (4MB flash)
+#
+# Rispetto a min_spiffs.csv (default PlatformIO):
+#   app0 / app1 : 0x1F0000 (1.938 MB) invece di 0x1E0000 (1.875 MB)  +64 KB ciascuna
+#   spiffs      : 0x10000  (64 KB)    invece di 0x30000  (192 KB)    -128 KB
+#
+# Margine OTA rispetto a v1.3 (1.852 MB): ~88 KB (4.4%)
+# LittleFS 64 KB: ~2.100 record da 30 byte a 10 min = ~14 giorni di log
+#
+# ATTENZIONE: questa tabella entra in vigore solo con flash USB completo.
+#             Il flash OTA aggiorna solo la partizione app, non la partition table.
+#
+# Name,    Type, SubType, Offset,   Size,     Flags
+nvs,       data, nvs,     0x9000,   0x5000,
+otadata,   data, ota,     0xe000,   0x2000,
+app0,      app,  ota_0,   0x10000,  0x1F0000,
+app1,      app,  ota_1,   0x200000, 0x1F0000,
+spiffs,    data, spiffs,  0x3F0000, 0x10000,

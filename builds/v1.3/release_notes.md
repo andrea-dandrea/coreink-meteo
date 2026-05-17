@@ -38,10 +38,12 @@ Aggiunta di sei nuovi moduli: buzzer, LED status, data logger, parser GPS esteso
 
 ### Note di build (CoreInk)
 
-- Flash: 98.4% (partizione `min_spiffs.csv` — 1.87MB app, necessaria per BLE+WiFi+tutti i moduli)
+- Flash: 98.8% (partizione `coreink_partitions.csv` — app 1.938 MB, LittleFS 64 KB)
 - RAM: 20.4%
-- LittleFS data logger: ~64KB disponibili, ~2000 record da 30 byte
+- LittleFS data logger: ~64 KB disponibili, ~2.100 record da 30 byte
 - `CORE_DEBUG_LEVEL` ridotto da 3 a 1 per risparmiare flash
+- **Nota OTA**: la partition table sul dispositivo resta `min_spiffs` fino al primo flash USB completo.
+  Il firmware funziona correttamente su entrambi gli schemi (entra in entrambe le partizioni app).
 
 ### Stato build
 
@@ -56,7 +58,7 @@ Aggiunta di sei nuovi moduli: buzzer, LED status, data logger, parser GPS esteso
 |------|-----------|------|
 | firmware_coreink_v1.3.bin | ~1.9 MB | Firmware applicazione CoreInk |
 | bootloader_coreink_v1.3.bin | ~17 KB | Bootloader ESP32 |
-| partitions_coreink_v1.3.bin | ~3 KB | Tabella partizioni min_spiffs |
+| partitions_coreink_v1.3.bin | ~3 KB | Tabella partizioni `coreink_partitions.csv` (app 1.938 MB, LittleFS 64 KB) |
 
 ---
 
