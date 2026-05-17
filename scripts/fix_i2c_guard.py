@@ -10,7 +10,7 @@ Vedi docs/build_notes_v1.md §4 per i dettagli.
 Import("env")
 import os
 
-def fix_guard(source, target, env):
+def fix_guard(source=None, target=None, env=env):
     libdeps = os.path.join(env["PROJECT_LIBDEPS_DIR"], env["PIOENV"])
     header = os.path.join(libdeps, "M5Unit-ENV", "src", "I2C_Class.h")
 
@@ -29,4 +29,5 @@ def fix_guard(source, target, env):
             f.write(content)
         print("[fix_i2c_guard] Patched I2C_Class.h include guard")
 
-env.AddPreAction("buildprog", fix_guard)
+# Eseguire immediatamente alla valutazione dello script
+fix_guard()

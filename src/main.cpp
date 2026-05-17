@@ -16,7 +16,6 @@
 
 #include <Wire.h>
 #include <WiFi.h>
-#include <WiFiMulti.h>
 #include <WiFiManager.h>
 #include <time.h>
 #include <TinyGPSPlus.h>
@@ -36,8 +35,18 @@
 #include "smartbeacon.h"
 #include "buzzer.h"
 #include "led_status.h"
+#ifndef DATA_LOGGER_ENABLED
+#define DATA_LOGGER_ENABLED 1
+#endif
+#ifndef GPS_EXTRA_ENABLED
+#define GPS_EXTRA_ENABLED 1
+#endif
+#if DATA_LOGGER_ENABLED
 #include "data_logger.h"
+#endif
+#if GPS_EXTRA_ENABLED
 #include "gps_extra.h"
+#endif
 #include "astro.h"
 
 #if OTA_ENABLED
@@ -77,8 +86,7 @@
 WebServer otaServer(OTA_WEB_PORT);
 #endif
 
-// === WiFi Multi ===
-WiFiMulti wifiMulti;
+
 
 // === Sensori ENV III (SHT30 + QMP6988) ===
 SHT3X sht3x;
@@ -92,7 +100,9 @@ int portMode = PORT_MODE_DEFAULT;
 
 // === GPS ===
 TinyGPSPlus gps;
+#if GPS_EXTRA_ENABLED
 GpsExtra gpsExtra;
+#endif
 HardwareSerial gpsSerial(1);
 bool gpsFixValid = false;
 float gpsLat = 0.0;
@@ -123,6 +133,9 @@ unsigned long lastDisplayTime = 0;
 unsigned long lastTelemetryTime = 0;
 unsigned long lastTelemetryDefTime = 0;
 unsigned long lastStatusTime = 0;
+unsigned long rtDisplayUpdateMs = DISPLAY_UPDATE_MS;  // Configurabile via WiFiManager
+unsigned long rtWeatherIntervalMs = WEATHER_INTERVAL_MS;  // Configurabile
+unsigned long rtStatusIntervalMs = APRS_STATUS_INTERVAL_MS;  // Configurabile
 unsigned long lastLogTime = 0;
 unsigned long uptimeStart = 0;
 int telemetrySeq = 0;
@@ -141,6 +154,7 @@ char rtLocator[11] = "";
 char rtSymbolTable = '/';
 char rtSymbolCode = '_';
 char rtAprsStatus[64] = "";
+int rtSsidAprs = 13;
 
 // === WiFi/BT stato runtime ===
 bool wifiEnabled = true;
@@ -238,6 +252,8 @@ void setup() {
         strncpy(rtPasscode, s.c_str(), sizeof(rtPasscode) - 1);
         rtPasscode[sizeof(rtPasscode) - 1] = '\0';
 
+        rtSsidAprs = nvs_load_int(NVS_KEY_SSID_APRS, profiles[activeProfile].ssid);
+
         s = nvs_load_string(NVS_KEY_LOCATOR, STATION_LOCATOR);
         strncpy(rtLocator, s.c_str(), sizeof(rtLocator) - 1);
         rtLocator[sizeof(rtLocator) - 1] = '\0';
@@ -256,6 +272,13 @@ void setup() {
         s = nvs_load_string(NVS_KEY_APRS_STATUS, APRS_STATUS_DEFAULT);
         strncpy(rtAprsStatus, s.c_str(), sizeof(rtAprsStatus) - 1);
         rtAprsStatus[sizeof(rtAprsStatus) - 1] = '\0';
+
+        // Display refresh
+        rtDisplayUpdateMs = nvs_load_int(NVS_KEY_DISPLAY_REFRESH, DISPLAY_UPDATE_MS / 1000) * 1000UL;
+
+        // Intervalli APRS
+        rtWeatherIntervalMs = nvs_load_int(NVS_KEY_WEATHER_INTERVAL, WEATHER_INTERVAL_MS / 60000) * 60000UL;
+        rtStatusIntervalMs = nvs_load_int(NVS_KEY_STATUS_INTERVAL, APRS_STATUS_INTERVAL_MS / 60000) * 60000UL;
     }
 
     Serial.printf("[NVS] Call=%s Pass=%s Loc=%s Sym=%c%c\n",
@@ -265,12 +288,26 @@ void setup() {
     wifiEnabled = nvs_load_int(NVS_KEY_WIFI_ENABLED, 1) != 0;
     if (wifiEnabled) {
         WiFi.mode(WIFI_STA);
+
+        // DOWN premuto al boot = reset credenziali WiFi
+        M5.update();
+        if (M5.BtnDOWN.isPressed()) {
+            Serial.println("[WiFi] Reset credenziali (DOWN premuto)");
+            WiFiManager wmReset;
+            wmReset.resetSettings();
+            buzzer_play_event(BUZZ_CONFIRM);
+        }
+
         connectWiFi();
         if (WiFi.status() != WL_CONNECTED) {
             startWiFiManager();
         }
         if (WiFi.status() == WL_CONNECTED) {
-            led_set_state(LED_SOLID);
+            if (strcmp(rtCallsign, "NOCALL") != 0 && strcmp(rtPasscode, "-1") != 0) {
+                led_set_state(LED_SOLID);
+            } else {
+                led_set_state(LED_SLOW);  // WiFi ok ma APRS non configurato
+            }
             buzzer_play_event(BUZZ_WIFI_OK);
         }
     } else {
@@ -312,7 +349,9 @@ void setup() {
 #endif
 
     // Data logger
+#if DATA_LOGGER_ENABLED
     logger_init();
+#endif
 
     // Prima lettura
     if (portMode == PORT_MODE_ENV) readSensors();
@@ -328,10 +367,13 @@ void setup() {
                  && strcmp(rtPasscode, "-1") != 0;
 
     if (canTx) {
+        if (portMode == PORT_MODE_ENV) {
+            readSensors();
+            delay(200);
+            readSensors();  // Doppia lettura per QMP6988 cold boot
+        }
         sendWeatherPacket();
-        sendPositionPacket();
-        sendTelemetryDefinitions();
-        sendStatusPacket();
+        sendPositionPacket();  // Posizione iniziale (una tantum se fissa)
     } else {
         Serial.println("[APRS] TX saltato: configura callsign/passcode via WiFiManager (MID 3s)");
     }
@@ -377,25 +419,25 @@ void loop() {
                  && strcmp(rtCallsign, "NOCALL") != 0
                  && strcmp(rtPasscode, "-1") != 0;
 
-    // Meteo ogni SEND_INTERVAL_MS
-    if (now - lastWeatherTime >= SEND_INTERVAL_MS) {
+    // Meteo ogni rtWeatherIntervalMs (default 5 min)
+    if (now - lastWeatherTime >= rtWeatherIntervalMs) {
         if (portMode == PORT_MODE_ENV) readSensors();
         if (canTx) sendWeatherPacket();
         lastWeatherTime = now;
     }
 
-    // Posizione (non SmartBeaconing)
+    // Posizione: SmartBeacon se GPS, altrimenti non ripetere (è fissa)
     bool sbActive = false;
 #if SMARTBEACON_ENABLED
     sbActive = (portMode == PORT_MODE_GPS);
 #endif
-    if (!sbActive && (now - lastPositionTime >= SEND_INTERVAL_MS)) {
-        if (canTx) sendPositionPacket();
+    if (sbActive && (now - lastPositionTime >= WEATHER_INTERVAL_MS)) {
+        if (canTx && gpsFixValid) sendPositionPacket();
         lastPositionTime = now;
     }
 
-    // Telemetria
-    if (now - lastTelemetryTime >= SEND_INTERVAL_MS) {
+    // Telemetria ogni TELEMETRY_INTERVAL_MS (default 10 min)
+    if (now - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
         batVoltage = readBattery();
         if (canTx) sendTelemetry();
         lastTelemetryTime = now;
@@ -408,19 +450,21 @@ void loop() {
     }
 
     // Status APRS
-    if (now - lastStatusTime >= APRS_STATUS_INTERVAL_MS) {
+    if (now - lastStatusTime >= rtStatusIntervalMs) {
         if (canTx) sendStatusPacket();
         lastStatusTime = now;
     }
 
     // Data logger
+#if DATA_LOGGER_ENABLED
     if (logger_is_enabled() && (now - lastLogTime >= (unsigned long)logger_get_interval() * 1000UL)) {
         writeLogRecord();
         lastLogTime = now;
     }
+#endif
 
     // Display
-    if (now - lastDisplayTime >= DISPLAY_UPDATE_MS) {
+    if (now - lastDisplayTime >= rtDisplayUpdateMs) {
         if (portMode == PORT_MODE_ENV) readSensors();
         batVoltage = readBattery();
         coordShowMaidenhead = !coordShowMaidenhead;
@@ -493,7 +537,11 @@ void loop() {
         if (now - lastReconnect > 60000) {
             connectWiFi();
             if (WiFi.status() == WL_CONNECTED) {
-                led_set_state(LED_SOLID);
+                if (strcmp(rtCallsign, "NOCALL") != 0 && strcmp(rtPasscode, "-1") != 0) {
+                    led_set_state(LED_SOLID);
+                } else {
+                    led_set_state(LED_SLOW);
+                }
                 buzzer_play_event(BUZZ_WIFI_OK);
             }
             lastReconnect = now;
@@ -524,20 +572,21 @@ void connectWiFi() {
     WiFi.disconnect();
     for (int i = 0; i < NUM_WIFI_APS; i++) {
         if (strlen(wifiNetworks[i].ssid) > 1 && strcmp(wifiNetworks[i].ssid, "RETE_1") != 0) {
-            wifiMulti.addAP(wifiNetworks[i].ssid, wifiNetworks[i].password);
+            WiFi.begin(wifiNetworks[i].ssid, wifiNetworks[i].password);
+            start = millis();
+            while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS / NUM_WIFI_APS) {
+                delay(500);
+                Serial.print(".");
+            }
+            if (WiFi.status() == WL_CONNECTED) {
+                Serial.printf("\n[WiFi] Connesso: %s IP: %s\n",
+                              WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+                return;
+            }
+            WiFi.disconnect();
         }
     }
-    start = millis();
-    while (wifiMulti.run() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
-        delay(500);
-        Serial.print(".");
-    }
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.printf("\n[WiFi] Connesso: %s IP: %s\n",
-                      WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
-    } else {
-        Serial.println("\n[WiFi] FALLITO!");
-    }
+    Serial.println("\n[WiFi] FALLITO!");
 }
 
 // ============================================================================
@@ -545,6 +594,7 @@ void connectWiFi() {
 // ============================================================================
 void startWiFiManager() {
     Serial.println("[WiFiManager] Portale captive...");
+    esp_task_wdt_delete(NULL);  // Disabilita watchdog durante configurazione
 
 #if defined(BOARD_COREINK)
     M5.M5Ink.clear();
@@ -568,7 +618,9 @@ void startWiFiManager() {
 #endif
 
     WiFiManager wm;
-    wm.setConfigPortalTimeout(WIFIMANAGER_TIMEOUT);
+    wm.setConfigPortalTimeout(300);  // 5 minuti — sicuro contro watchdog
+    wm.setConnectTimeout(10);        // Max 10s per tentativo di connessione
+    wm.setBreakAfterConfig(true);    // Chiudi solo dopo salvataggio
 
     // ---- Parametri APRS ----
     WiFiManagerParameter hdr1("<hr><h3>Stazione APRS</h3>");
@@ -578,11 +630,16 @@ void startWiFiManager() {
         nvs_load_string(NVS_KEY_CALLSIGN, profiles[activeProfile].callsign).c_str(), 10);
     wm.addParameter(&p_call);
 
+    char ssidBuf[4];
+    snprintf(ssidBuf, sizeof(ssidBuf), "%d", nvs_load_int(NVS_KEY_SSID_APRS, profiles[activeProfile].ssid));
+    WiFiManagerParameter p_ssid("ssid_aprs", "SSID APRS (0-15, 13=meteo)", ssidBuf, 3);
+    wm.addParameter(&p_ssid);
+
     WiFiManagerParameter p_pass("passcode", "Passcode APRS-IS (5 cifre, vedi aprs.fi)",
         nvs_load_string(NVS_KEY_PASSCODE, profiles[activeProfile].passcode).c_str(), 6);
     wm.addParameter(&p_pass);
 
-    WiFiManagerParameter p_loc("locator", "Locatore Maidenhead (es. JN61fw)",
+    WiFiManagerParameter p_loc("locator", "Locatore Maidenhead max 8 char (es. JN61fw12)",
         nvs_load_string(NVS_KEY_LOCATOR, STATION_LOCATOR).c_str(), 10);
     wm.addParameter(&p_loc);
 
@@ -612,48 +669,97 @@ void startWiFiManager() {
     WiFiManagerParameter p_mel("melody", "Melodia boot (0-5)", melBuf, 2);
     wm.addParameter(&p_mel);
 
-    if (wm.startConfigPortal(WIFIMANAGER_AP_NAME)) {
-        Serial.println("[WiFiManager] Connesso!");
+    // ---- Display ----
+    WiFiManagerParameter hdr3("<hr><h3>Display</h3>");
+    wm.addParameter(&hdr3);
 
-        // Salvare tutto
-        if (strlen(p_call.getValue()) > 0) {
-            nvs_save_string(NVS_KEY_CALLSIGN, p_call.getValue());
-            strncpy(rtCallsign, p_call.getValue(), sizeof(rtCallsign) - 1);
-            rtCallsign[sizeof(rtCallsign) - 1] = '\0';
-        }
-        if (strlen(p_pass.getValue()) > 0) {
-            nvs_save_string(NVS_KEY_PASSCODE, p_pass.getValue());
-            strncpy(rtPasscode, p_pass.getValue(), sizeof(rtPasscode) - 1);
-            rtPasscode[sizeof(rtPasscode) - 1] = '\0';
-        }
-        if (strlen(p_loc.getValue()) > 0) {
-            nvs_save_string(NVS_KEY_LOCATOR, p_loc.getValue());
-            strncpy(rtLocator, p_loc.getValue(), sizeof(rtLocator) - 1);
-            rtLocator[sizeof(rtLocator) - 1] = '\0';
-        }
-        if (strlen(p_sym.getValue()) >= 2) {
-            nvs_save_string(NVS_KEY_SYMBOL, p_sym.getValue());
-            rtSymbolTable = p_sym.getValue()[0];
-            rtSymbolCode = p_sym.getValue()[1];
-        }
-        if (strlen(p_status.getValue()) > 0) {
-            nvs_save_string(NVS_KEY_APRS_STATUS, p_status.getValue());
-            strncpy(rtAprsStatus, p_status.getValue(), sizeof(rtAprsStatus) - 1);
-            rtAprsStatus[sizeof(rtAprsStatus) - 1] = '\0';
-        }
+    char refBuf[5];
+    snprintf(refBuf, sizeof(refBuf), "%d", (int)(rtDisplayUpdateMs / 1000));
+    WiFiManagerParameter p_ref("disp_ref", "Refresh display (secondi, 10-300)", refBuf, 4);
+    wm.addParameter(&p_ref);
 
-        int vol = atoi(p_vol.getValue());
-        if (vol >= 0 && vol <= 100) buzzer_set_volume(vol);
+    // ---- Intervalli TX ----
+    WiFiManagerParameter hdr4("<hr><h3>Intervalli TX</h3>");
+    wm.addParameter(&hdr4);
 
-        int mel = atoi(p_mel.getValue());
-        if (mel >= 0 && mel <= 5) nvs_save_int(NVS_KEY_BOOT_MELODY, mel);
+    char wxBuf[4];
+    snprintf(wxBuf, sizeof(wxBuf), "%d", (int)(rtWeatherIntervalMs / 60000));
+    WiFiManagerParameter p_wx("wx_intv", "Meteo ogni N minuti (1-60)", wxBuf, 3);
+    wm.addParameter(&p_wx);
 
-        Serial.printf("[WM] Call=%s Pass=%s Loc=%s Sym=%c%c\n",
-                      rtCallsign, rtPasscode, rtLocator, rtSymbolTable, rtSymbolCode);
-        syncTime();
-    } else {
-        Serial.println("[WiFiManager] Timeout");
+    char stBuf[4];
+    snprintf(stBuf, sizeof(stBuf), "%d", (int)(rtStatusIntervalMs / 60000));
+    WiFiManagerParameter p_st("st_intv", "Status ogni N minuti (10-180)", stBuf, 4);
+    wm.addParameter(&p_st);
+
+    bool wifiOk = wm.startConfigPortal(WIFIMANAGER_AP_NAME);
+
+    // Salvare parametri SEMPRE (anche se WiFi non si connette)
+    if (strlen(p_call.getValue()) > 0) {
+        nvs_save_string(NVS_KEY_CALLSIGN, p_call.getValue());
+        strncpy(rtCallsign, p_call.getValue(), sizeof(rtCallsign) - 1);
+        rtCallsign[sizeof(rtCallsign) - 1] = '\0';
     }
+    {
+        int ssid = atoi(p_ssid.getValue());
+        if (ssid >= 0 && ssid <= 15) {
+            nvs_save_int(NVS_KEY_SSID_APRS, ssid);
+            rtSsidAprs = ssid;
+        }
+    }
+    if (strlen(p_pass.getValue()) > 0) {
+        nvs_save_string(NVS_KEY_PASSCODE, p_pass.getValue());
+        strncpy(rtPasscode, p_pass.getValue(), sizeof(rtPasscode) - 1);
+        rtPasscode[sizeof(rtPasscode) - 1] = '\0';
+    }
+    if (strlen(p_loc.getValue()) > 0) {
+        nvs_save_string(NVS_KEY_LOCATOR, p_loc.getValue());
+        strncpy(rtLocator, p_loc.getValue(), sizeof(rtLocator) - 1);
+        rtLocator[sizeof(rtLocator) - 1] = '\0';
+    }
+    if (strlen(p_sym.getValue()) >= 2) {
+        nvs_save_string(NVS_KEY_SYMBOL, p_sym.getValue());
+        rtSymbolTable = p_sym.getValue()[0];
+        rtSymbolCode = p_sym.getValue()[1];
+    }
+    if (strlen(p_status.getValue()) > 0) {
+        nvs_save_string(NVS_KEY_APRS_STATUS, p_status.getValue());
+        strncpy(rtAprsStatus, p_status.getValue(), sizeof(rtAprsStatus) - 1);
+        rtAprsStatus[sizeof(rtAprsStatus) - 1] = '\0';
+    }
+
+    int vol = atoi(p_vol.getValue());
+    if (vol >= 0 && vol <= 100) buzzer_set_volume(vol);
+
+    int mel = atoi(p_mel.getValue());
+    if (mel >= 0 && mel <= 5) nvs_save_int(NVS_KEY_BOOT_MELODY, mel);
+
+    int ref = atoi(p_ref.getValue());
+    if (ref >= 10 && ref <= 300) {
+        nvs_save_int(NVS_KEY_DISPLAY_REFRESH, ref);
+        rtDisplayUpdateMs = ref * 1000UL;
+    }
+
+    int wx = atoi(p_wx.getValue());
+    if (wx >= 1 && wx <= 60) {
+        nvs_save_int(NVS_KEY_WEATHER_INTERVAL, wx);
+        rtWeatherIntervalMs = wx * 60000UL;
+    }
+
+    int st = atoi(p_st.getValue());
+    if (st >= 10 && st <= 180) {
+        nvs_save_int(NVS_KEY_STATUS_INTERVAL, st);
+        rtStatusIntervalMs = st * 60000UL;
+    }
+
+    Serial.printf("[WM] Call=%s Pass=%s Loc=%s Sym=%c%c SSID=%d\n",
+                  rtCallsign, rtPasscode, rtLocator, rtSymbolTable, rtSymbolCode, rtSsidAprs);
+
+    if (wifiOk) {
+        syncTime();
+    }
+
+    esp_task_wdt_add(NULL);  // Riattiva watchdog dopo configurazione
 }
 
 // ============================================================================
@@ -723,7 +829,9 @@ void readGps() {
     while (gpsSerial.available() > 0) {
         char c = gpsSerial.read();
         gps.encode(c);
+#if GPS_EXTRA_ENABLED
         gpsExtra.encode(c);
+#endif
     }
     if (gps.location.isUpdated() && gps.location.isValid()) {
         gpsLat = gps.location.lat();
@@ -751,11 +859,18 @@ void switchPortMode(int newMode) {
     if (newMode == PORT_MODE_ENV) {
         Wire.begin(32, 33);
         sht3x.begin(&Wire, SHT3X_I2C_ADDR, 32, 33, 400000U);
-        if (qmp.begin(&Wire, QMP6988_SLAVE_ADDRESS_L, 32, 33, 400000U)) {
-            delay(100);
-            qmp.update();  // Warmup: scartare prima lettura
+        // QMP6988: retry init con delay crescente (fix cold boot)
+        bool qmpOk = false;
+        for (int attempt = 0; attempt < 3 && !qmpOk; attempt++) {
+            delay(100 * (attempt + 1));
+            qmpOk = qmp.begin(&Wire, QMP6988_SLAVE_ADDRESS_L, 32, 33, 400000U);
         }
-        Serial.println("[PORT] ENV III (I2C) attivo");
+        if (qmpOk) {
+            delay(50);
+            qmp.update();  // Warmup: scartare prima lettura
+            qmp.update();  // Seconda lettura per stabilizzare
+        }
+        Serial.printf("[PORT] ENV III (I2C) attivo, QMP6988: %s\n", qmpOk ? "OK" : "FAIL");
     } else if (newMode == PORT_MODE_GPS) {
         gpsFixValid = false;
         gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
@@ -793,14 +908,26 @@ void drawPortModeNotice() {
 // ============================================================================
 String latlon_to_maidenhead(float lat, float lon) {
     lon += 180.0f; lat += 90.0f;
-    char loc[7];
+    char loc[11];
     loc[0] = 'A' + (int)(lon / 20.0f);
     loc[1] = 'A' + (int)(lat / 10.0f);
-    loc[2] = '0' + (int)(fmod(lon, 20.0f) / 2.0f);
-    loc[3] = '0' + (int)(fmod(lat, 10.0f));
-    loc[4] = 'a' + (int)(fmod(lon, 2.0f) / (2.0f / 24.0f));
-    loc[5] = 'a' + (int)(fmod(lat, 1.0f) / (1.0f / 24.0f));
-    loc[6] = '\0';
+    float lon2 = fmod(lon, 20.0f);
+    float lat2 = fmod(lat, 10.0f);
+    loc[2] = '0' + (int)(lon2 / 2.0f);
+    loc[3] = '0' + (int)(lat2);
+    float lon3 = fmod(lon2, 2.0f);
+    float lat3 = fmod(lat2, 1.0f);
+    loc[4] = 'a' + (int)(lon3 / (2.0f / 24.0f));
+    loc[5] = 'a' + (int)(lat3 / (1.0f / 24.0f));
+    float lon4 = fmod(lon3, 2.0f / 24.0f);
+    float lat4 = fmod(lat3, 1.0f / 24.0f);
+    loc[6] = '0' + (int)(lon4 / (2.0f / 240.0f));
+    loc[7] = '0' + (int)(lat4 / (1.0f / 240.0f));
+    float lon5 = fmod(lon4, 2.0f / 240.0f);
+    float lat5 = fmod(lat4, 1.0f / 240.0f);
+    loc[8] = 'a' + (int)(lon5 / (2.0f / 5760.0f));
+    loc[9] = 'a' + (int)(lat5 / (1.0f / 5760.0f));
+    loc[10] = '\0';
     return String(loc);
 }
 
@@ -819,23 +946,21 @@ void drawPage(int page) {
     M5.M5Ink.clear();
     mainSprite.clear();
 
-    // Header: nominativo | pagina | porta | versione
-    snprintf(buf, sizeof(buf), "%s-%d", rtCallsign, prof.ssid);
+    // Header: nominativo | pagina | versione
+    snprintf(buf, sizeof(buf), "%s-%d", rtCallsign, rtSsidAprs);
     mainSprite.drawString(2, 0, buf, &fonts::AsciiFont8x16);
     snprintf(buf, sizeof(buf), "%d/%d", page + 1, NUM_PAGES);
     mainSprite.drawString(90, 0, buf, &fonts::AsciiFont8x16);
-    mainSprite.drawString(135, 0,
-        portMode == PORT_MODE_GPS ? (gpsFixValid ? "GPS" : "gps") : "ENV",
-        &fonts::AsciiFont8x16);
     snprintf(buf, sizeof(buf), "v%s", FW_VERSION);
-    mainSprite.drawString(165, 0, buf, &fonts::AsciiFont8x16);
+    int vx = 200 - (strlen(buf) * 8);
+    mainSprite.drawString(vx, 0, buf, &fonts::AsciiFont8x16);
 
     switch (page) {
 
     case 0: { // === Principale: meteo + posizione ===
         struct tm ti;
         if (getLocalTime(&ti)) {
-            snprintf(buf, sizeof(buf), "%02d:%02d", ti.tm_hour, ti.tm_min);
+            snprintf(buf, sizeof(buf), "Ora %02d:%02d", ti.tm_hour, ti.tm_min);
             mainSprite.drawString(2, 188, buf, &fonts::AsciiFont8x16);
         }
         snprintf(buf, sizeof(buf), "T: %.1f C", temperature);
@@ -868,7 +993,11 @@ void drawPage(int page) {
         if (portMode == PORT_MODE_GPS && gpsFixValid) {
             snprintf(buf, sizeof(buf), "Alt:%.0fm Spd:%.1fkm/h", gpsAlt, gpsSpeed);
             mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
+#if GPS_EXTRA_ENABLED
             snprintf(buf, sizeof(buf), "Sat:%d HDOP:%.1f", gpsSatellites, gpsExtra.getHdop());
+#else
+            snprintf(buf, sizeof(buf), "Sat:%d", gpsSatellites);
+#endif
             mainSprite.drawString(5, 136, buf, &fonts::AsciiFont8x16);
         }
 
@@ -879,8 +1008,7 @@ void drawPage(int page) {
         }
         mainSprite.drawString(5, 154, buf, &fonts::AsciiFont8x16);
 
-        snprintf(buf, sizeof(buf), "TX:%s %s  %c%c", lastTxTime, lastTxOk ? "OK" : "FAIL",
-                 rtSymbolTable, rtSymbolCode);
+        snprintf(buf, sizeof(buf), "TX:%s %s", lastTxTime, lastTxOk ? "OK" : "FAIL");
         mainSprite.drawString(5, 172, buf, &fonts::AsciiFont8x16);
         break;
     }
@@ -893,6 +1021,7 @@ void drawPage(int page) {
             mainSprite.drawString(5, 100, "attivare modo GPS", &fonts::AsciiFont8x16);
             break;
         }
+#if GPS_EXTRA_ENABLED
         snprintf(buf, sizeof(buf), "Fix: %s  Q:%d", gpsFixValid ? "SI" : "NO", gpsExtra.getFixQuality());
         mainSprite.drawString(5, 40, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Vista:%d  Uso:%d", gpsExtra.getSatsInView(), gpsExtra.getSatsTracked());
@@ -901,6 +1030,12 @@ void drawPage(int page) {
         mainSprite.drawString(5, 76, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Alt: %.1f m", gpsExtra.getAltitude());
         mainSprite.drawString(5, 94, buf, &fonts::AsciiFont8x16);
+#else
+        snprintf(buf, sizeof(buf), "Fix: %s  Sat:%d", gpsFixValid ? "SI" : "NO", gpsSatellites);
+        mainSprite.drawString(5, 40, buf, &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "Alt: %.0f m", gpsAlt);
+        mainSprite.drawString(5, 58, buf, &fonts::AsciiFont8x16);
+#endif
         snprintf(buf, sizeof(buf), "Vel: %.1f km/h", gpsSpeed);
         mainSprite.drawString(5, 112, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Rotta: %.0f deg", gpsCourse);
@@ -916,6 +1051,7 @@ void drawPage(int page) {
     }
 
     case 2: { // === SNR Satelliti (barre) ===
+#if GPS_EXTRA_ENABLED
         mainSprite.drawString(5, 20, "=== Segnale SAT ===", &fonts::AsciiFont8x16);
         if (portMode != PORT_MODE_GPS) {
             mainSprite.drawString(5, 60, "GPS non attivo", &fonts::AsciiFont8x16);
@@ -937,6 +1073,13 @@ void drawPage(int page) {
             y += 15;
         }
         if (n == 0) mainSprite.drawString(5, 60, "Nessun satellite", &fonts::AsciiFont8x16);
+#else
+        mainSprite.drawString(5, 20, "=== GPS ===", &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "Sat: %d  Fix: %s", gpsSatellites, gpsFixValid ? "SI" : "NO");
+        mainSprite.drawString(5, 50, buf, &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 80, "(Dettaglio SAT non", &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 100, " disponibile)", &fonts::AsciiFont8x16);
+#endif
         break;
     }
 
@@ -1009,8 +1152,6 @@ void drawPage(int page) {
         mainSprite.drawString(5, 76, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Porta: %s", portMode == PORT_MODE_ENV ? "ENV III" : "GPS");
         mainSprite.drawString(5, 100, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Simbolo: %c%c", rtSymbolTable, rtSymbolCode);
-        mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
         mainSprite.drawString(5, 150, "EXT: cambia ENV/GPS", &fonts::AsciiFont8x16);
         break;
     }
@@ -1050,12 +1191,13 @@ void drawPage(int page) {
         mainSprite.drawString(5, 102, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Fase: %d/29", moonP);
         mainSprite.drawString(5, 120, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "%02d/%02d/%04d", ti.tm_mday, ti.tm_mon + 1, ti.tm_year + 1900);
+        snprintf(buf, sizeof(buf), "Data: %02d/%02d/%04d", ti.tm_mday, ti.tm_mon + 1, ti.tm_year + 1900);
         mainSprite.drawString(5, 145, buf, &fonts::AsciiFont8x16);
         break;
     }
 
     case 8: { // === Data Logger ===
+#if DATA_LOGGER_ENABLED
         mainSprite.drawString(5, 20, "=== Recorder ===", &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Stato: %s", logger_is_enabled() ? "REC" : "STOP");
         mainSprite.drawString(5, 40, buf, &fonts::AsciiFont8x16);
@@ -1070,6 +1212,9 @@ void drawPage(int page) {
             snprintf(buf, sizeof(buf), "CSV: :%d/data", OTA_WEB_PORT);
             mainSprite.drawString(5, 120, buf, &fonts::AsciiFont8x16);
         }
+#endif
+#else
+        mainSprite.drawString(5, 20, "=== Info ===", &fonts::AsciiFont8x16);
 #endif
         int upMin = (millis() - uptimeStart) / 60000;
         snprintf(buf, sizeof(buf), "Uptime: %dh %dm", upMin / 60, upMin % 60);
@@ -1087,7 +1232,7 @@ void drawPage(int page) {
     lcd.setTextSize(1);
     lcd.setCursor(5, 2);
     snprintf(buf, sizeof(buf), "%s-%d %s %d/%d",
-             rtCallsign, prof.ssid,
+             rtCallsign, rtSsidAprs,
              portMode == PORT_MODE_GPS ? "GPS" : "ENV",
              page + 1, NUM_PAGES);
     lcd.print(buf);
@@ -1140,21 +1285,22 @@ void drawPage(int page) {
 // ============================================================================
 void sendWeatherPacket() {
     if (WiFi.status() != WL_CONNECTED) {
-        if (wifiMulti.run(WIFI_TIMEOUT_MS) != WL_CONNECTED) { lastTxOk = false; return; }
+        connectWiFi();
+        if (WiFi.status() != WL_CONNECTED) { lastTxOk = false; return; }
     }
     const StationProfile& prof = profiles[activeProfile];
     String packet;
     if (portMode == PORT_MODE_GPS && gpsFixValid) {
-        packet = aprs_build_weather_packet(rtCallsign, prof.ssid,
+        packet = aprs_build_weather_packet(rtCallsign, rtSsidAprs,
             gpsLat, gpsLon, rtSymbolTable, rtSymbolCode,
             temperature, humidity, pressure);
     } else {
-        packet = aprs_build_weather_packet(rtCallsign, prof.ssid,
+        packet = aprs_build_weather_packet(rtCallsign, rtSsidAprs,
             rtLocator, rtSymbolTable, rtSymbolCode,
             temperature, humidity, pressure);
     }
     Serial.printf("[APRS-WX] %s\n", packet.c_str());
-    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, prof.ssid, rtPasscode);
+    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, rtSsidAprs, rtPasscode);
     if (txClient.connect()) {
         if (txClient.sendPacket(packet)) {
             lastTxOk = true;
@@ -1180,21 +1326,22 @@ void sendWeatherPacket() {
 // ============================================================================
 void sendPositionPacket() {
     if (WiFi.status() != WL_CONNECTED) {
-        if (wifiMulti.run(WIFI_TIMEOUT_MS) != WL_CONNECTED) return;
+        connectWiFi();
+        if (WiFi.status() != WL_CONNECTED) return;
     }
     const StationProfile& prof = profiles[activeProfile];
     char comment[48];
     snprintf(comment, sizeof(comment), "Vbat=%.2fV %s", batVoltage, FW_VERSION);
     String packet;
     if (portMode == PORT_MODE_GPS && gpsFixValid) {
-        packet = aprs_build_position_packet(rtCallsign, prof.ssid,
+        packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
             gpsLat, gpsLon, rtSymbolTable, rtSymbolCode, comment);
     } else {
-        packet = aprs_build_position_packet(rtCallsign, prof.ssid,
+        packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
             rtLocator, rtSymbolTable, rtSymbolCode, comment);
     }
     Serial.printf("[APRS-POS] %s\n", packet.c_str());
-    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, prof.ssid, rtPasscode);
+    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, rtSsidAprs, rtPasscode);
     if (txClient.connect()) {
         txClient.sendPacket(packet);
         txClient.disconnect();
@@ -1206,7 +1353,8 @@ void sendPositionPacket() {
 // ============================================================================
 void sendTelemetry() {
     if (WiFi.status() != WL_CONNECTED) {
-        if (wifiMulti.run(WIFI_TIMEOUT_MS) != WL_CONNECTED) return;
+        connectWiFi();
+        if (WiFi.status() != WL_CONNECTED) return;
     }
     const StationProfile& prof = profiles[activeProfile];
     int sats = (portMode == PORT_MODE_GPS) ? gpsSatellites : 0;
@@ -1214,27 +1362,28 @@ void sendTelemetry() {
     if (portMode == PORT_MODE_GPS && gpsFixValid) bits |= 0x80;
     if (WiFi.status() == WL_CONNECTED) bits |= 0x40;
     if (lastTxOk) bits |= 0x10;
-    String packet = aprs_build_telemetry_data(rtCallsign, prof.ssid,
+    String packet = aprs_build_telemetry_data(rtCallsign, rtSsidAprs,
         telemetrySeq, (int)(batVoltage * 1000), WiFi.RSSI(),
         (int)((millis() - uptimeStart) / 60000), sats, bits);
     Serial.printf("[APRS-TLM] %s\n", packet.c_str());
-    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, prof.ssid, rtPasscode);
+    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, rtSsidAprs, rtPasscode);
     if (txClient.connect()) { txClient.sendPacket(packet); txClient.disconnect(); }
     telemetrySeq++;
 }
 
 void sendTelemetryDefinitions() {
     if (WiFi.status() != WL_CONNECTED) {
-        if (wifiMulti.run(WIFI_TIMEOUT_MS) != WL_CONNECTED) return;
+        connectWiFi();
+        if (WiFi.status() != WL_CONNECTED) return;
     }
     const StationProfile& prof = profiles[activeProfile];
-    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, prof.ssid, rtPasscode);
+    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, rtSsidAprs, rtPasscode);
     if (txClient.connect()) {
-        txClient.sendPacket(aprs_build_telemetry_parm(rtCallsign, prof.ssid));
+        txClient.sendPacket(aprs_build_telemetry_parm(rtCallsign, rtSsidAprs));
         delay(500);
-        txClient.sendPacket(aprs_build_telemetry_unit(rtCallsign, prof.ssid));
+        txClient.sendPacket(aprs_build_telemetry_unit(rtCallsign, rtSsidAprs));
         delay(500);
-        txClient.sendPacket(aprs_build_telemetry_eqns(rtCallsign, prof.ssid));
+        txClient.sendPacket(aprs_build_telemetry_eqns(rtCallsign, rtSsidAprs));
         txClient.disconnect();
         Serial.println("[APRS-TLM] Definizioni inviate");
     }
@@ -1245,14 +1394,15 @@ void sendTelemetryDefinitions() {
 // ============================================================================
 void sendStatusPacket() {
     if (WiFi.status() != WL_CONNECTED) {
-        if (wifiMulti.run(WIFI_TIMEOUT_MS) != WL_CONNECTED) return;
+        connectWiFi();
+        if (WiFi.status() != WL_CONNECTED) return;
     }
     const StationProfile& prof = profiles[activeProfile];
     char header[64];
-    snprintf(header, sizeof(header), "%s-%d>APRS,TCPIP*:", rtCallsign, prof.ssid);
+    snprintf(header, sizeof(header), "%s-%d>APRS,TCPIP*:", rtCallsign, rtSsidAprs);
     String packet = String(header) + ">" + String(rtAprsStatus);
     Serial.printf("[APRS-STS] %s\n", packet.c_str());
-    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, prof.ssid, rtPasscode);
+    AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, rtSsidAprs, rtPasscode);
     if (txClient.connect()) { txClient.sendPacket(packet); txClient.disconnect(); }
 }
 
@@ -1328,6 +1478,7 @@ void drawProfileMenu() {
 // ============================================================================
 // Data Logger
 // ============================================================================
+#if DATA_LOGGER_ENABLED
 void writeLogRecord() {
     LogRecord rec;
     memset(&rec, 0, sizeof(rec));
@@ -1355,6 +1506,7 @@ void writeLogRecord() {
     logger_write_record(rec);
     Serial.printf("[LOG] Record #%u\n", logger_get_count());
 }
+#endif // DATA_LOGGER_ENABLED
 
 // ============================================================================
 // OTA
@@ -1405,7 +1557,13 @@ void setupOTA() {
             else Update.printError(Serial);
         }
     });
-    otaServer.on("/data", HTTP_GET, []() { logger_serve_csv(&otaServer); });
+    otaServer.on("/data", HTTP_GET, []() {
+#if DATA_LOGGER_ENABLED
+        logger_serve_csv(&otaServer);
+#else
+        otaServer.send(200, "text/plain", "Data logger non disponibile in questa build");
+#endif
+    });
     otaServer.begin();
     Serial.printf("[Web] http://%s:%d/update | /data\n", WiFi.localIP().toString().c_str(), OTA_WEB_PORT);
 }

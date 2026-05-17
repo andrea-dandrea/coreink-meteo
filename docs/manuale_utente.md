@@ -97,8 +97,10 @@ Per riaprire il portale di configurazione WiFi: **tenere premuto MID per 3 secon
 |--------|----------|
 | SU | Pagina precedente |
 | GIÙ | Pagina successiva |
-| MID (pressione breve) | Azione contestuale (seleziona, conferma, toggle) |
+| MID (pressione breve) | Commutazione modo ENV↔GPS |
 | MID (pressione lunga 3s) | Apre portale WiFiManager |
+| EXT (pulsante fisico sopra) | Libero / TX forzato (futuro) |
+| DOWN al boot | Reset credenziali WiFi |
 
 ### Indicatore pagina
 
@@ -197,7 +199,7 @@ Tutti i parametri sono salvati in NVS (persistenti tra riavvii e aggiornamenti O
 | Callsign | `callsign` | "NOCALL" | Nominativo radioamatoriale |
 | SSID | (da profilo) | 13 | SSID APRS (0-15) |
 | Passcode | `passcode` | "-1" | Codice autenticazione APRS-IS |
-| Locatore | `locator` | "JN61fw" | Maidenhead 4-8 caratteri |
+| Locatore | `locator` | "JN61fw" | Maidenhead max 8 char (input manuale). Display mostra 10 char calcolati da GPS |
 | Status | `aprs_status` | "CoreInk-Meteo v1.3 by EA5JDG/IZ3ARR" | Commento stazione |
 | Intervallo status | `status_interval` | 1800000 (30 min) | ms tra invii status |
 | Profilo attivo | `profile` | 0 | Indice profilo (0-2) |

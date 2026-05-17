@@ -4,11 +4,11 @@
 
 bool maidenhead_to_latlon(const char* locator, float &lat, float &lon) {
     int len = strlen(locator);
-    if (len < 4 || len == 5) return false;
+    if (len < 4 || len == 5 || len == 7) return false;
 
-    char loc[7];
-    strncpy(loc, locator, 6);
-    loc[6] = '\0';
+    char loc[9];
+    strncpy(loc, locator, 8);
+    loc[8] = '\0';
 
     // Primo coppia: campo (A-R) -> 20 gradi lon, 10 gradi lat
     if (!isalpha(loc[0]) || !isalpha(loc[1])) return false;
@@ -24,16 +24,28 @@ bool maidenhead_to_latlon(const char* locator, float &lat, float &lon) {
     float lon_sub = 0.0, lat_sub = 0.0;
     if (len >= 6) {
         if (!isalpha(loc[4]) || !isalpha(loc[5])) return false;
-        lon_sub = (toupper(loc[4]) - 'A') * (2.0 / 24.0) + (1.0 / 24.0);
-        lat_sub = (toupper(loc[5]) - 'A') * (1.0 / 24.0) + (0.5 / 24.0);
+        lon_sub = (toupper(loc[4]) - 'A') * (2.0 / 24.0);
+        lat_sub = (toupper(loc[5]) - 'A') * (1.0 / 24.0);
     } else {
         // Centro del quadrato per locatori a 4 caratteri
         lon_sub = 1.0;
         lat_sub = 0.5;
     }
 
-    lon = (lon_field * 20.0) + (lon_square * 2.0) + lon_sub - 180.0;
-    lat = (lat_field * 10.0) + (lat_square * 1.0) + lat_sub - 90.0;
+    // Quarta coppia: estensione (0-9) -> 1/120 grado lon, 1/240 grado lat
+    float lon_ext = 0.0, lat_ext = 0.0;
+    if (len >= 8) {
+        if (!isdigit(loc[6]) || !isdigit(loc[7])) return false;
+        lon_ext = (loc[6] - '0') * (2.0 / 240.0) + (1.0 / 240.0);
+        lat_ext = (loc[7] - '0') * (1.0 / 240.0) + (0.5 / 240.0);
+    } else if (len >= 6) {
+        // Centro del sottoquadrato per locatori a 6 caratteri
+        lon_ext = 1.0 / 24.0;
+        lat_ext = 0.5 / 24.0;
+    }
+
+    lon = (lon_field * 20.0) + (lon_square * 2.0) + lon_sub + lon_ext - 180.0;
+    lat = (lat_field * 10.0) + (lat_square * 1.0) + lat_sub + lat_ext - 90.0;
 
     return true;
 }

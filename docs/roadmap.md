@@ -8,6 +8,9 @@
 | v1.0 | Stazione meteo APRS completa | 2026-05-05 |
 | v1.1 | OTA WiFi + BLE + WiFiManager | 2026-05-16 |
 | v1.2 | Fix NVS callsign/locator, versione FW a schermo | 2026-05-17 |
+| v1.2.5 | Refactor build LITE (partizione default.csv, senza BLE/logger/gps_extra) | 2026-05-17 |
+| v1.2.6 | Fix WiFiManager (watchdog, salvataggio, timeout), display, LED, intervalli TX | 2026-05-17 |
+| v1.2.7 | Fix locator Maidenhead 8-char, display 10-char, prima APRS-IS operativa | 2026-05-18 |
 | v1.3 | Moduli avanzati: buzzer, LED, data logger, GPS+, astro, BLE OTA, partizioni custom | 2026-05-17 |
 
 ---

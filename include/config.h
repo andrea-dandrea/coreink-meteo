@@ -2,7 +2,9 @@
 #define CONFIG_H
 
 // === Versione firmware ===
+#ifndef FW_VERSION
 #define FW_VERSION "1.3"
+#endif
 
 // === Reti WiFi memorizzate (si connette alla prima disponibile) ===
 struct WiFiAP {
@@ -96,11 +98,15 @@ const StationProfile profiles[NUM_PROFILES] = {
 // === BLE OTA (firmware via Bluetooth) ===
 // Usa un servizio GATT per ricevere il firmware in chunk da telefono (nRF Connect)
 // o app custom. Funziona anche senza WiFi.
-#define BLE_OTA_ENABLED 1         // 1 = BLE OTA abilitato, 0 = disabilitato
+#ifndef BLE_OTA_ENABLED
+#define BLE_OTA_ENABLED 1
+#endif         // 1 = BLE OTA abilitato, 0 = disabilitato
 
 // === Bluetooth (BLE) ===
 // WiFi e BLE funzionano in parallelo sull'ESP32 (time-division multiplexing).
-#define BLE_ENABLED 0             // 1 = BLE abilitato, 0 = disabilitato
+#ifndef BLE_ENABLED
+#define BLE_ENABLED 0
+#endif             // 1 = BLE abilitato, 0 = disabilitato
 #define BLE_DEVICE_NAME "CoreInkMeteo"
 
 // === Batteria ===
@@ -111,7 +117,7 @@ const StationProfile profiles[NUM_PROFILES] = {
 // === WiFiManager ===
 // Tenere premuto il pulsante centrale durante il boot per forzare il portale captive.
 #define WIFIMANAGER_AP_NAME "CoreInkMeteo-Setup"
-#define WIFIMANAGER_TIMEOUT 180   // Timeout portale captive (secondi)
+#define WIFIMANAGER_TIMEOUT 600   // Timeout portale captive (secondi) — 10 minuti
 
 // === Telemetria APRS ===
 // Intervallo di invio pacchetti PARM/UNIT/EQNS (definizione canali)
@@ -119,8 +125,10 @@ const StationProfile profiles[NUM_PROFILES] = {
 // Canali: 1=Vbat(mV), 2=RSSI(dBm+100), 3=Uptime(min), 4=SatGPS, 5=libero
 
 // === Temporizzazione ===
-#define SEND_INTERVAL_MS 600000   // Intervallo di invio: 10 minuti (usato senza GPS/SmartBeacon)
-#define WIFI_TIMEOUT_MS 15000     // Timeout connessione WiFi
+#define WEATHER_INTERVAL_MS 300000   // Meteo ogni 5 minuti (default)
+#define TELEMETRY_INTERVAL_MS 600000 // Telemetria ogni 10 minuti
+#define POSITION_INTERVAL_MS 0       // 0 = solo al boot se posizione fissa (no GPS)
+#define WIFI_TIMEOUT_MS 15000        // Timeout connessione WiFi
 
 // === Display ===
 #define DISPLAY_UPDATE_MS 60000   // Aggiornare il display ogni minuto
@@ -135,7 +143,7 @@ const StationProfile profiles[NUM_PROFILES] = {
 
 // === APRS Status ===
 #define APRS_STATUS_DEFAULT "CoreInk-Meteo v" FW_VERSION " by EA5JDG/IZ3ARR"
-#define APRS_STATUS_INTERVAL_MS 1800000  // 30 minuti
+#define APRS_STATUS_INTERVAL_MS 3600000  // Status ogni 60 minuti (default)
 
 // === Data Logger ===
 #define LOG_RECORD_SIZE 30        // Bytes per record
@@ -162,6 +170,8 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define NVS_KEY_BAT_SAMPLES "bat_samp"
 #define NVS_KEY_APRS_STATUS "aprs_stat"
 #define NVS_KEY_STATUS_INTERVAL "stat_intv"
+#define NVS_KEY_DISPLAY_REFRESH "disp_ref"
+#define NVS_KEY_WEATHER_INTERVAL "wx_intv"
 #define NVS_KEY_OWM_KEY "owm_key"
 #define NVS_KEY_OWM_INTERVAL "owm_intv"
 #define NVS_KEY_TIDE_KEY "tide_key"

@@ -2,6 +2,48 @@
 
 ---
 
+## v1.2.7 — Fix locator Maidenhead (2026-05-18)
+
+Fix precisione posizione e display locator.
+
+### Fix
+- `maidenhead_to_latlon()`: supporto completo locator 4/6/8 caratteri (era troncato a 6)
+- `latlon_to_maidenhead()`: calcola 10 caratteri per visualizzazione display (era 6)
+- WiFiManager: label locator indica "max 8 char", maxlength corretto
+
+### Note
+- Prima versione con APRS-IS operativo e verificato su aprs.fi
+- GPS testato con fix rapido (warm start AT6558)
+
+---
+
+## v1.2.6 — Fix WiFiManager e display (2026-05-17)
+
+Fix critici portale configurazione, display e intervalli TX.
+
+### Fix
+- WiFiManager: watchdog disabilitato durante portale (non si chiude più dopo 30s)
+- Parametri salvati SEMPRE (non solo su connessione WiFi riuscita)
+- SSID APRS configurabile (0-15), refresh display e intervalli meteo/status configurabili
+- Display: versione allineata a destra, rimossi "ENV" e simbolo APRS dalla riga TX
+- LED: lento se WiFi ok ma APRS non configurato
+- Primo TX: doppio readSensors() per cold-boot QMP6988
+- DOWN al boot: reset credenziali WiFiManager
+
+### Bug noti
+- Locator 8-char ignorato (fix in v1.2.7)
+- Nessuna pagina web di configurazione (solo OTA + CSV)
+- Profili stazione hardcoded non editabili
+- SmartBeacon troppo aggressivo con GPS fermo
+
+---
+
+## v1.2.5 — Build LITE (2026-05-17)
+
+Refactor per partizione default.csv (1.25 MB app). Eliminati BLE, data logger, gps_extra.
+
+---
+
 ## v1.3 — Moduli avanzati (2026-05-17)
 
 Aggiunta di sei nuovi moduli e schema partizioni custom.

@@ -2,6 +2,50 @@
 
 ---
 
+## v1.3a — Ottimizzazione flash (2026-05-17)
+
+Build ottimizzato per ridurre l'occupazione flash e garantire margine OTA sulla partizione `min_spiffs` (1.875 MB) attualmente sul dispositivo.
+
+### Modifiche rispetto a v1.3
+
+| Modifica | Effetto |
+|----------|---------|
+| `CORE_DEBUG_LEVEL=0` (era 1) | Eliminazione stringhe log ESP-IDF residue |
+| `-ffunction-sections -fdata-sections` + gc-sections | Linker rimuove codice morto non raggiungibile |
+| `board_build.f_flash = 80000000L` | Flash a 80 MHz (velocità lettura) |
+| Rimosso `WiFiMulti` | Libreria ridondante (WiFiManager gestisce già tutto); fallback sequenziale su reti config.h |
+| Fix QMP6988 cold boot | Retry init ×3 con delay crescente + doppio warmup read |
+
+### Dimensioni build
+
+| Metrica | v1.3 | v1.3a | Differenza |
+|---------|------|-------|------------|
+| Flash (byte) | 1.942.458 (98.4% di 1.938 MB custom) | 1.889.833 (93.0% di 1.938 MB custom) | **−52.625 byte** |
+| Flash vs min_spiffs (1.966.080) | 98.8% | **96.1%** — margine 76 KB | +3.9% margine |
+| RAM | 20.4% | 20.4% | invariata |
+
+### Compatibilità OTA
+
+- ✅ Entra nella partizione `min_spiffs` (app = 1.875 MB = 1.966.080 byte)
+- ✅ Entra nella partizione `coreink_partitions.csv` custom (app = 1.938 MB)
+- ✅ Funzionalità identiche a v1.3 (nessuna rimozione feature)
+- ✅ Fix aggiuntivo: sensore pressione QMP6988 ora risponde al cold boot
+
+### File binari
+
+| File | Dimensione | Note |
+|------|-----------|------|
+| `firmware_coreink_v1.3.bin` | 1.942.458 byte | Build originale v1.3 (DEBUG_LEVEL=1, con WiFiMulti) |
+| `firmware_coreink_v1.3a.bin` | 1.889.833 byte | **Build ottimizzato** (DEBUG_LEVEL=0, gc-sections, senza WiFiMulti, fix QMP6988) |
+| `bootloader_coreink_v1.3.bin` | ~17 KB | Bootloader ESP32 (condiviso) |
+| `partitions_coreink_v1.3.bin` | ~3 KB | Tabella partizioni custom (condivisa, non serve per OTA) |
+
+### Quale flashare via OTA?
+
+**Usare `firmware_coreink_v1.3a.bin`** — identico funzionalmente, più piccolo, con fix pressione.
+
+---
+
 ## v1.3 — Moduli avanzati (2026-05-17)
 
 Aggiunta di sei nuovi moduli: buzzer, LED status, data logger, parser GPS esteso, calcoli astronomici, BLE OTA indipendente.

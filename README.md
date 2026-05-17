@@ -28,6 +28,9 @@ L'autore declina ogni responsabilità per un utilizzo non conforme alle normativ
 
 | Versione | Data       | Note                                              |
 |----------|------------|---------------------------------------------------|
+| v1.2.7   | 2026-05-18 | Fix locator 8-char, display 10-char, APRS-IS operativo |
+| v1.2.6   | 2026-05-17 | Fix WiFiManager, display, intervalli TX configurabili |
+| v1.2.5   | 2026-05-17 | Build LITE: partizione default.csv senza BLE/logger |
 | v1.3     | 2026-05-17 | Moduli avanzati: buzzer, LED, data logger, astro  |
 | v1.2     | 2026-05-17 | Fix NVS, versione FW su display                   |
 | v1.1     | 2026-05-16 | OTA WiFi + BLE (no USB)                           |
