@@ -6,36 +6,35 @@ Stazione meteorologica basata su M5Stack CoreInk con sensore ENV III che pubblic
 
 **ADAsoft** — Andrea D'Andrea
 
-| Ruolo | Responsabile |
-|-------|--------------|
-| Design e architettura | Andrea D'Andrea — IZ3ARR |
-| Codice sorgente | Claude |
-| Verifica e validazione | Andrea D'Andrea — EA5JDG |
+| Ruolo                  | Responsabile    |
+|------------------------|-----------------|
+| Design e architettura  | Andrea D'Andrea |
+| Codice sorgente        | Claude          |
+| Verifica e validazione | Andrea D'Andrea |
 
 ## ⚠️ Disclaimer — Uso legale della rete APRS
 
 La rete APRS (Automatic Packet Reporting System) opera su frequenze radio amatoriali regolamentate.
 L'uso di questa applicazione per trasmettere dati sulla rete APRS-IS **richiede**:
-
-- Il possesso di una **licenza radioamatoriale valida** nel proprio paese di operazione
-- L'uso **esclusivo del proprio nominativo** assegnato dall'autorità competente (in Italia: MISE/MIMIT)
-- Il rispetto delle **normative vigenti** in materia di telecomunicazioni nel proprio paese di operazione
+- Il possesso di una **licenza radioamatoriale valida** nel proprio paese di operazione;
+- L'uso **esclusivo del proprio nominativo** assegnato dall'autorità competente del paese in cui si opera;
+- Il rispetto delle **normative vigenti** in materia di telecomunicazioni nel proprio paese di operazione.
 
 L'uso di nominativi altrui, di nominativi fittizi o l'operatività senza licenza costituisce **violazione di legge**.
 L'autore declina ogni responsabilità per un utilizzo non conforme alle normative applicabili.
 
 ## Versione
-
-| Versione | Data       | Note                                              |
-|----------|------------|---------------------------------------------------|
+     
+| Versione | Data       | Note                                                   |
+|----------|------------|--------------------------------------------------------|
 | v1.2.7   | 2026-05-18 | Fix locator 8-char, display 10-char, APRS-IS operativo |
-| v1.2.6   | 2026-05-17 | Fix WiFiManager, display, intervalli TX configurabili |
-| v1.2.5   | 2026-05-17 | Build LITE: partizione default.csv senza BLE/logger |
-| v1.3     | 2026-05-17 | Moduli avanzati: buzzer, LED, data logger, astro  |
-| v1.2     | 2026-05-17 | Fix NVS, versione FW su display                   |
-| v1.1     | 2026-05-16 | OTA WiFi + BLE (no USB)                           |
-| v1.0     | 2026-05-05 | Stazione meteo completa                           |
-| v0.1     | 2026-05-01 | Prototipo iniziale                                |
+| v1.2.6   | 2026-05-17 | Fix WiFiManager, display, intervalli TX configurabili  |
+| v1.2.5   | 2026-05-17 | Build LITE: partizione default.csv senza BLE/logger    |
+| v1.3     | 2026-05-17 | Moduli avanzati: buzzer, LED, data logger, astro       |
+| v1.2     | 2026-05-17 | Fix NVS, versione FW su display                        |
+| v1.1     | 2026-05-16 | OTA WiFi + BLE (no USB)                                |
+| v1.0     | 2026-05-05 | Stazione meteo completa                                |
+| v0.1     | 2026-05-01 | Prototipo iniziale                                     |
 
 ## Hardware
 
@@ -103,13 +102,13 @@ Al boot il display mostra i 3 profili configurati. Usare i pulsanti SU/GIÙ per 
 
 Ogni profilo include un simbolo APRS indipendente per la visualizzazione su aprs.fi:
 
-| Tabella | Codice | Icona               |
-|---------|--------|---------------------|
-| `/`     | `_`    | Stazione meteo (blu)|
+| Tabella | Codice | Icona                 |
+|---------|--------|-----------------------|
+| `/`     | `_`    | Stazione meteo (blu)  |
 | `\`     | `_`    | Stazione meteo (verde)|
-| `/`     | `W`    | Sito NWS            |
-| `\`     | `W`    | WX supersite        |
-| `/`     | `-`    | Casa / QTH          |
+| `/`     | `W`    | Sito NWS              |
+| `\`     | `W`    | WX supersite          |
+| `/`     | `-`    | Casa / QTH            |
 
 ## SmartBeaconing
 
@@ -210,13 +209,13 @@ Questo progetto è realizzato nello spirito di condivisione della comunità radi
 
 ### Librerie di terze parti
 
-| Libreria | Autore | Licenza |
-|----------|--------|---------|
-| [M5Core-Ink](https://github.com/m5stack/M5Core-Ink) | M5Stack | MIT |
-| [M5GFX](https://github.com/m5stack/M5GFX) | M5Stack | MIT |
-| [M5StickCPlus2](https://github.com/m5stack/M5StickCPlus2) | M5Stack | MIT |
-| [M5Unit-ENV](https://github.com/m5stack/M5Unit-ENV) | M5Stack | MIT |
-| [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus) | Mikal Hart | GNU LGPL v2.1 |
-| [WiFiManager](https://github.com/tzapu/WiFiManager) | tzapu | MIT |
+| Libreria                                                              | Autore            | Licenza                |
+|-----------------------------------------------------------------------|-------------------|------------------------|
+| [M5Core-Ink](https://github.com/m5stack/M5Core-Ink)                   | M5Stack           | MIT                    |
+| [M5GFX](https://github.com/m5stack/M5GFX)                             | M5Stack           | MIT                    |
+| [M5StickCPlus2](https://github.com/m5stack/M5StickCPlus2)             | M5Stack           | MIT                    |
+| [M5Unit-ENV](https://github.com/m5stack/M5Unit-ENV)                   | M5Stack           | MIT                    |
+| [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus)               | Mikal Hart        | GNU LGPL v2.1          |
+| [WiFiManager](https://github.com/tzapu/WiFiManager)                   | tzapu             | MIT                    |
 | [ESP32 Arduino Framework](https://github.com/espressif/arduino-esp32) | Espressif Systems | LGPL v2.1 / Apache 2.0 |
-| NOAA Solar Calculator | U.S. NOAA / ESRL | Pubblico dominio |
+| NOAA Solar Calculator                                                 | U.S. NOAA / ESRL  | Pubblico dominio       |
