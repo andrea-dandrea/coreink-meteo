@@ -4,7 +4,7 @@ Stazione meteorologica basata su M5Stack CoreInk con sensore ENV III che pubblic
 
 ## Autore e crediti di sviluppo
 
-**ADAsoft** — Andrea D'Andrea
+**ADAsoft** — Andrea D'Andrea (IZ3ARR / EA5JDG)
 
 | Ruolo                  | Responsabile    |
 |------------------------|-----------------|
