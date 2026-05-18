@@ -11,25 +11,41 @@
 
 ## Circuito di alimentazione
 
+> Schema di riferimento: [docs/HW/coreink_sch_page_01.png](HW/coreink_sch_page_01.png)
+
 ```
-LiPo 3.7V
+USB VBUS (5V)
     │
-    ├──► TP4057 (o equivalente) ← USB 5V (CH9102 VBUS)
-    │         Caricabatterie LiPo
-    │         - Corrente di carica: ~500mA (configurabile con R)
-    │         - Nessun pin di stato carica accessibile via GPIO
+    ├──► TP40P57 (caricatore lineare, variante TP4054/MCP73831)
+    │         IN:  USB VBUS
+    │         BAT: SYS_BAT — regolato a 4.2V (fine carica)
+    │         Corrente di carica: ~200mA (R45 = 5.1kΩ sul pin PROG)
+    │         CHḠ: LED rosso indicatore carica (non collegato a GPIO)
+    │         STDBY: non collegato
     │
-    └──► SY7088 (boost converter)
-              │  IN: 3.0–4.2V (da LiPo)
-              │  OUT: 5V @ 500mA
-              │  NON è un caricabatterie
-              └──► alimenta ESP32, display, periferiche 5V
+    └──► PWR_SW&ADC (Q4 SI2301 P-MOS, Q5 SI2302 N-MOS)
+              Trigger accensione: GPIO12 (PS_EN/HOLD) OR USB_5V
+                via diodi D14/D19 → gate Q5 → gate Q4
+              │
+              Q4 source = SYS_BAT (LiPo, ≤4.2V)
+              Q4 drain  = SY7088 VIN  ←── nodo misurato da GPIO35
+              │
+              ├──► GPIO35 via R41(20kΩ top) / R42(5.1kΩ bottom) + C30(1µF)
+              │
+              └──► SY7088 (boost sincrono, abilitato da PS_EN)
+                        IN:  SYS_BAT 3.0–4.2V
+                        OUT: SYS_P050 5V ◄─── anche USB VBUS (path condiviso)
+                        │
+                        └──► SY8089 (buck, EN auto-attivo)
+                                  IN:  SYS_P050 5V
+                                  OUT: MCU_VDD 3.3V → ESP32
 ```
 
 ### SY7088 — Cosa NON fa
-Il SY7088 è un **boost converter** (elevatore di tensione), non gestisce la carica.
+Il SY7088 è un **boost converter sincrono** (elevatore di tensione), non gestisce la carica.
 Non ha output di stato, non segnala fine carica, non disconnette il carico.
-La carica è gestita da un chip separato (TP4057 o compatibile) collegato a USB.
+La carica è gestita dal TP40P57 collegato a USB.
+`PS_EN` controlla l'abilitazione del SY7088 (pad non collegato a GPIO ESP32 nella scheda attuale).
 
 ---
 
@@ -150,26 +166,74 @@ autonomamente (feature, non bug — evita batteria scarica per stallo infinito).
 
 ---
 
-## Rilevamento tensione batteria — ADC ESP32
+## Misura tensione batteria — circuito PWR_SW&ADC e ADC ESP32
+
+> Schema di riferimento: [docs/HW/coreink_sch_page_01.png](HW/coreink_sch_page_01.png)
+
+### Partitore resistivo — formula e valori reali
+
+| Componente | Valore | Ruolo |
+|---|---|---|
+| R41 | 20 kΩ | Resistenza serie (top) |
+| R42 | 5.1 kΩ | Resistenza a GND (bottom) |
+| R_totale | 25.1 kΩ | |
+| C30 | 1 µF | Filtro anti-rumore in parallelo a R42 |
+
+$$V_{GPIO35} = V_{nodo} \times \frac{5.1}{25.1}$$
+
+Il codice implementa correttamente l'inverso:
+```cpp
+float voltage = float(voltageMv) * 25.1f / 5.1f / 1000.0f;
+// = V_GPIO35 × (R_totale / R_bottom) ← formula corretta
+```
+Il commento in `config.h` ("partitore 25.1/5.1") è fuorviante (indica totale/basso,
+non top/basso) ma il **codice è matematicamente corretto**.
+
+### Letture attese in condizioni normali (solo batteria)
+
+| V_LiPo | V_GPIO35 | Lettura codice |
+|---|---|---|
+| 4.2 V (piena) | 854 mV | 4.20 V |
+| 3.7 V (nominale) | 751 mV | 3.70 V |
+| 3.3 V (cut-off) | 670 mV | 3.30 V |
+
+### Effetto backdrive SY7088 con USB collegata
+
+Il SY7088 usa un **raddrizzatore sincrono** (FET interno invece di un diodo Schottky).
+Quando `USB_VBUS > SYS_P050` (es. caricatore mal regolato o QC senza handshake),
+la body diode del FET sincrono conduce in direzione inversa: VOUT → VIN,
+elevando il nodo SY7088 VIN = nodo misurato da GPIO35.
+
+$$V_{nodo\_ADC} \approx V_{USB\_VBUS} - V_{body\_diode} \approx V_{USB\_VBUS} - 0.4\,\text{V}$$
+
+| Tipo caricatore | USB VBUS | Nodo ADC effettivo | Lettura codice |
+|---|---|---|---|
+| Standard 5V regolato | 5.0 V | 4.2 V (batteria, no backdrive) | ~4.2 V |
+| Economico mal regolato | 6.0 V | 5.6 V | ~5.6 V |
+| QC senza handshake | 9.0 V | 8.6 V | ~8.6 V |
+
+> **Il TP40P57 isola correttamente USB VBUS dalla LiPo** (caricatore lineare).
+> L'elevazione sul nodo ADC non si trasmette alla batteria, che rimane ≤ 4.2 V.
+> Il backdrive non danneggia la LiPo; può però stressare il nodo SY7088 VIN
+> se il caricatore eroga tensioni molto alte (QC 9V+ senza handshake).
+
+### Rilevamento USB via soglia ADC (fix software)
+
+Poiché la LiPo non può fisicamente superare 4.2 V, una lettura > 4.4 V indica
+con certezza che USB è collegata e la misura non è affidabile come tensione batteria:
 
 ```cpp
-// ADC ESP32 ha rumore significativo (~30–50mV variazione)
-// Usare media mobile su N campioni:
-#define ADC_SAMPLES 16
-
-float readBattery() {
-    uint32_t sum = 0;
-    for (int i = 0; i < ADC_SAMPLES; i++) {
-        sum += analogRead(BAT_ADC_PIN);
-        delayMicroseconds(100);
-    }
-    float raw = sum / ADC_SAMPLES;
-    // Fattore di scala per partitore resistivo CoreInk (verifica con multimetro)
-    return raw * (3.3f / 4095.0f) * 2.0f;  // Partitore 1:1 → ×2
+bool isOnUsb() {
+    return batVoltage > 4.4f;  // backdrive SY7088: VBUS > 5V → nodo ADC elevato
 }
 ```
 
-**Nota**: non misurare durante WiFi TX (spike di corrente distorcono la lettura ADC).
+**Conseguenze per il codice**:
+- `batVoltage` NON è la tensione LiPo reale quando `isOnUsb() == true`
+- L'algoritmo slope-detection (sezione precedente) deve essere sospeso se su USB
+- Display e pacchetti APRS T# dovrebbero mostrare "USB" invece di un valore non significativo
+
+**Nota ADC**: non misurare durante WiFi TX (spike di corrente distorcono la lettura).
 Misurare almeno 100ms dopo l'ultimo invio.
 
 ---
