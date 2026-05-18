@@ -26,7 +26,7 @@
 │  - Display: icona WiFi barrata                                       │
 │  - Nessun retry, nessun AP automatico                                │
 │  - Transizioni:                                                      │
-│      → WIFI_CONNECTING  da menu pagina 4 → "Connetti AP 1/2/3"       │
+│      → WIFI_CONNECTING  da menu P4 → "Connetti AP 1/2/3"             │
 │      → WIFI_AP_CONFIG   da menu EMERGENZA → "Apri AP interno"        │
 └──────────────────────────────────────────────────────────────────────┘
 
@@ -41,7 +41,7 @@
 │  - Transizioni:                                                      │
 │      → WIFI_CONNECTED   se WL_CONNECTED                              │
 │      → WIFI_WAITING     se timeout                                   │
-│      → WIFI_AP_CONFIG   da menu EMERGENZA (EXT long 3s)              │
+│      → WIFI_AP_CONFIG   da menu EMERGENZA (MID long 3s)              │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -52,7 +52,7 @@
 │  - LED: SOLID (se APRS configurato) / SLOW (se NOCALL)              │
 │  - Transizioni:                                                      │
 │      → WIFI_DISCONNECTED  se WiFi.status() != WL_CONNECTED           │
-│      → WIFI_AP_CONFIG     da menu EMERGENZA (EXT long 3s)            │
+│      → WIFI_AP_CONFIG     da menu EMERGENZA (MID long 3s)            │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -63,7 +63,7 @@
 │  - LED: SLOW blink                                                   │
 │  - Transizioni:                                                      │
 │      → WIFI_CONNECTING   quando scade il timer di retry              │
-│      → WIFI_AP_CONFIG    da menu EMERGENZA (EXT long 3s)             │
+│      → WIFI_AP_CONFIG    da menu EMERGENZA (MID long 3s)             │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -71,11 +71,11 @@
 │  - Mai stato connesso (tentativo utente fallito, timeout 15s)        │
 │  - Nessun retry automatico — l'utente decide quando riprovare        │
 │  - Il loop GIRA normalmente (display, sensori, GPS)                  │
-│  - Display: icona [WiFi✗] + "EXT long: menu emergenza"              │
+│  - Display: icona [WiFi✗] + "MID long: menu emergenza"              │
 │  - LED: OFF o SLOW                                                   │
 │  - Transizioni:                                                      │
-│      → WIFI_CONNECTING   da menu pagina 4 → "Connetti"              │
-│      → WIFI_AP_CONFIG    da menu EMERGENZA (EXT long 3s)             │
+│      → WIFI_CONNECTING   da menu P4 → "Connetti"                    │
+│      → WIFI_AP_CONFIG    da menu EMERGENZA (MID long 3s)             │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -111,9 +111,9 @@
                                   └────────────┘
 
          Da QUALSIASI stato:
-              EXT long (3s) → MENU EMERGENZA → scelta "Apri AP interno" → WIFI_AP_CONFIG
-              EXT long (3s) → MENU EMERGENZA → scelta "Connetti WiFi"   → WIFI_CONNECTING
-              EXT long (3s) → MENU EMERGENZA → scelta "WiFi OFF"        → WIFI_OFF
+              MID long (3s) → MENU EMERGENZA (S6) → scelta "Apri AP interno" → WIFI_AP_CONFIG
+              MID long (3s) → MENU EMERGENZA (S6) → scelta "Connetti WiFi"   → WIFI_CONNECTING
+              MID long (3s) → MENU EMERGENZA (S6) → scelta "WiFi OFF"        → WIFI_OFF
               AP_CONFIG timeout → stato precedente
               AP_CONFIG salvato → WIFI_CONNECTING
 
@@ -126,7 +126,7 @@
 
 | Regola | Descrizione |
 |--------|-------------|
-| **R1** | L'AP di configurazione si apre SOLO da menu EMERGENZA (EXT long 3s → "Apri AP interno"). MAI automaticamente. |
+| **R1** | L'AP di configurazione si apre SOLO da menu EMERGENZA (MID long 3s → "Apri AP interno"). MAI automaticamente. |
 | **R2** | Il loop() non si blocca MAI. Anche senza WiFi, display/sensori/GPS funzionano. |
 | **R3** | Le reti hardcoded in config.h vengono ELIMINATE. Solo WiFiManager gestisce le credenziali. |
 | **R4** | Dopo disconnessione, retry con backoff progressivo (15s, 30s, 60s max). |
@@ -257,13 +257,12 @@ void wifi_update() {
 3. Carica parametri NVS (callsign, passcode, ecc.)
 4. wifiEnabled = NVS
 5. Se wifiEnabled:
-     WiFi.mode(WIFI_STA)
-     WiFi.begin()  ← credenziali salvate da WiFiManager
-     wifiState = WIFI_ST_CONNECTING
-     wifiRetryTime = now
+     Mostra S2 WiFi MENU (WIFI_MENU_TIMEOUT_S = 60s)
+       - Utente sceglie slot AP (1/2/3) → WiFi.begin() → wifiState = WIFI_ST_CONNECTING → S2c
+       - Utente sceglie "Salta" o timeout 60s → wifiState = WIFI_ST_WAITING → S3
    Altrimenti:
      WiFi.mode(WIFI_OFF)
-     wifiState = WIFI_ST_OFF
+     wifiState = WIFI_ST_OFF → S3
 6. Sensori, display, GPS — PROSEGUIRE SENZA ASPETTARE WiFi
 7. Nel loop: wifi_update() gestisce tutto
 ```
