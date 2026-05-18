@@ -42,6 +42,8 @@ L'autore declina ogni responsabilità per un utilizzo non conforme alle normativ
 - **ENV III Unit** - Sensore con SHT30 (temperatura + umidità) e QMP6988 (pressione barometrica)
 - **Modulo GPS** (opzionale) - Per posizione dinamica e SmartBeaconing
 
+Datasheet, schemi elettrici e pin mapping: [docs/hw_configuration.md](docs/hw_configuration.md)
+
 ## Funzionalità
 
 - Lettura di temperatura, umidità e pressione atmosferica
@@ -181,11 +183,19 @@ pio device monitor
 │   └── smartbeacon.cpp         # Implementazione SmartBeaconing
 ├── docs/
 │   ├── release_notes.md        # Changelog cumulativo tutte le versioni
+│   ├── release_procedure.md    # Procedura release (tagging, build, GitHub)
 │   ├── roadmap.md              # Funzionalità pianificate
 │   ├── manuale_utente.md       # Guida utente
 │   ├── build_notes_v1.md       # Note tecniche di build
+│   ├── hw_configuration.md     # Indice hardware: datasheet, schemi, pin mapping
 │   ├── coreink_datasheet.md    # Datasheet M5Stack CoreInk
-│   └── enviii_datasheet.md     # Datasheet ENV III Unit
+│   ├── enviii_datasheet.md     # Datasheet ENV III Unit
+│   ├── eink_analysis.md        # Analisi display e-ink: refresh, sleep, duty cycle
+│   ├── power_analysis.md       # Analisi alimentazione e charging detection
+│   ├── wifi_state_machine.md   # Macchina a stati WiFi
+│   ├── ui_button_model.md      # Modello pulsanti e livelli UI
+│   ├── screen_map.md           # Mappa schermate e transizioni
+│   └── HW/                     # Datasheet PDF, schemi elettrici
 └── builds/
     ├── v1.3/                   # Firmware v1.3 + release notes
     ├── v1.2/                   # Release notes (firmware sul dispositivo)

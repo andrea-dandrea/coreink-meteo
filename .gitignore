@@ -25,3 +25,7 @@ desktop.ini
 # Credenziali e file sensibili (non committare mai)
 secrets.h
 credentials.h
+
+docs/HW/CoreInk.mhtml
+*.mhtml
+!debug/*.mhtml
