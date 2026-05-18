@@ -779,11 +779,27 @@ void syncTime() {
 void readSensors() {
     if (portMode != PORT_MODE_ENV) return;
     if (sht3x.update()) {
-        temperature = sht3x.cTemp;
-        humidity = sht3x.humidity;
+        float t = sht3x.cTemp;
+        float h = sht3x.humidity;
+        if (t >= -40.0f && t <= 85.0f)  temperature = t;
+        else Serial.printf("[SHT3X] Temperatura fuori range: %.1f C — ignorata\n", t);
+        if (h >= 0.0f && h <= 100.0f)   humidity = h;
+        else Serial.printf("[SHT3X] Umidita' fuori range: %.1f %% — ignorata\n", h);
     }
     if (qmp.update()) {
-        pressure = qmp.pressure / 100.0f;
+        float p = qmp.pressure / 100.0f;
+        if (p >= 500.0f && p <= 1100.0f) {
+            pressure = p;
+        } else {
+            Serial.printf("[QMP] Pressione fuori range: %.1f hPa — reinit sensore\n", p);
+            pressure = 0.0f;
+            Wire.end();
+            delay(10);
+            Wire.begin(32, 33);
+            qmp.begin(&Wire, QMP6988_SLAVE_ADDRESS_L, 32, 33, 400000U);
+        }
+    } else {
+        pressure = 0.0f;
     }
     Serial.printf("[SENSORE] T=%.1fC H=%.1f%% P=%.1fhPa\n", temperature, humidity, pressure);
 }
@@ -857,6 +873,10 @@ void switchPortMode(int newMode) {
         Wire.end();
     }
     if (newMode == PORT_MODE_ENV) {
+        // Reset valori: resteranno 0 finché non arriva la prima lettura valida
+        temperature = 0.0f;
+        humidity    = 0.0f;
+        pressure    = 0.0f;
         Wire.begin(32, 33);
         sht3x.begin(&Wire, SHT3X_I2C_ADDR, 32, 33, 400000U);
         // QMP6988: retry init con delay crescente (fix cold boot)
@@ -869,9 +889,21 @@ void switchPortMode(int newMode) {
             delay(50);
             qmp.update();  // Warmup: scartare prima lettura
             qmp.update();  // Seconda lettura per stabilizzare
+            // Verifica post-switch: se pressione fuori range, reinit aggiuntivo
+            float p = qmp.pressure / 100.0f;
+            if (p < 500.0f || p > 1100.0f) {
+                Serial.printf("[QMP] Post-switch fuori range (%.1f hPa) — secondo reinit\n", p);
+                Wire.end(); delay(20); Wire.begin(32, 33);
+                qmpOk = qmp.begin(&Wire, QMP6988_SLAVE_ADDRESS_L, 32, 33, 400000U);
+                if (qmpOk) { delay(100); qmp.update(); qmp.update(); }
+            }
         }
         Serial.printf("[PORT] ENV III (I2C) attivo, QMP6988: %s\n", qmpOk ? "OK" : "FAIL");
     } else if (newMode == PORT_MODE_GPS) {
+        // Reset valori ENV: evita che dati corrotti restino visibili in GPS mode
+        temperature = 0.0f;
+        humidity    = 0.0f;
+        pressure    = 0.0f;
         gpsFixValid = false;
         gpsSerial.begin(GPS_BAUD, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
         Serial.println("[PORT] GPS (UART) attivo");

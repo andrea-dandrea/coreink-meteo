@@ -111,9 +111,6 @@ String aprs_build_weather_packet(const char* callsign, int ssid,
     int hum = (int)round(humidity);
     if (hum >= 100) hum = 0;
 
-    // Pressione in decimi di hPa (5 cifre)
-    long press_tenth = (long)round(pressure_hpa * 10.0);
-
     // Costruire posizione APRS
     String lat_str = aprs_format_lat(lat);
     String lon_str = aprs_format_lon(lon);
@@ -123,18 +120,32 @@ String aprs_build_weather_packet(const char* callsign, int ssid,
     snprintf(header, sizeof(header), "%s-%d>APRS,TCPIP*:", callsign, ssid);
 
     // Costruire dati meteo APRS
-    // Formato: @timestamp lat[symbolTable]lon[symbolCode] vento/vel raffica temp umidita pressione
+    // Formato: @timestamp lat[symbolTable]lon[symbolCode] vento/vel raffica temp umidita [pressione]
+    // Il campo b (pressione) viene omesso se il valore e' fuori range valido (500-1100 hPa)
     char weather[128];
-    snprintf(weather, sizeof(weather),
-             "@%s%s%c%s%c.../...g...t%03dh%02db%05ld",
-             timestamp,
-             lat_str.c_str(),
-             symbolTable,
-             lon_str.c_str(),
-             symbolCode,
-             temp_f,
-             hum,
-             press_tenth);
+    if (pressure_hpa >= 500.0f && pressure_hpa <= 1100.0f) {
+        long press_tenth = (long)round(pressure_hpa * 10.0);
+        snprintf(weather, sizeof(weather),
+                 "@%s%s%c%s%c.../...g...t%03dh%02db%05ld",
+                 timestamp,
+                 lat_str.c_str(),
+                 symbolTable,
+                 lon_str.c_str(),
+                 symbolCode,
+                 temp_f,
+                 hum,
+                 press_tenth);
+    } else {
+        snprintf(weather, sizeof(weather),
+                 "@%s%s%c%s%c.../...g...t%03dh%02d",
+                 timestamp,
+                 lat_str.c_str(),
+                 symbolTable,
+                 lon_str.c_str(),
+                 symbolCode,
+                 temp_f,
+                 hum);
+    }
 
     return String(header) + String(weather);
 }

@@ -1,26 +1,7 @@
 # Release Notes — v1.2.8 (in sviluppo)
 
-Web config, eliminazione profili, SmartBeacon rate limiting, riassegnazione pulsanti.
-
----
-
-## TODO
-
-### Priorità alta
-- [ ] Pagina `/config` su web server (porta 8080): form HTML per tutti i parametri NVS
-- [ ] Eliminare array `profiles[]` hardcoded — config singola NVS editabile via web
-- [ ] SmartBeacon rate limiting: min 60s tra posizioni, ignorare spostamenti <50m
-
-### Priorità media
-- [ ] MID breve → commutazione ENV↔GPS (spostare da EXT)
-- [ ] PARM/UNIT/EQNS: inviare solo al boot + ogni 2h (non ai primi N cicli meteo)
-- [ ] Non inviare weather se ENV III non collegata (rilevare assenza I2C)
-- [ ] EXT: assegnare a TX forzato immediato (o altro)
-
-### Priorità bassa
-- [ ] Rimuovere Vbat e FW_VERSION dal commento posizione
-- [ ] Schermo GPS: rimuovere ridondanza "fix sì/no" (Sat>0 implica fix)
-- [ ] Aggiungere conteggio satelliti BeiDou nel display GPS
+> Il contenuto pianificato per questa versione è stato incorporato in v1.2.7.
+> Questa sezione verrà aggiornata al termine della v1.2.7 con i fix rimasti.
 
 ---
 

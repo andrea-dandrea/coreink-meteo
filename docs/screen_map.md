@@ -5,21 +5,23 @@
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
-│  [S0] BOOT ──────────────────────────────► [S3] NAV  (WiFi OFF)             │
+│  [S0] BOOT ──────────────────────────────► [S2] WiFi MENU  (WIFI_MENU_TIMEOUT_S, def 60s)│
+│                                                 │                           │
+│                   scelta AP / WiFi OFF ─────────► [S3] NAV                  │
 │                                                 │                           │
 │                          MID ────────────► [S5] MENU CONTESTUALE            │
 │                                                 │                           │
 │                          EXT long ───────► [S6] MENU EMERGENZA              │
 │                                                 │                           │
-│                    (da menu pagina 4) ──► [S2] CONNECTING                   │
+│              (da S2 / menu) ────────────► [S2c] CONNECTING  (15s)          │
 │                                                 │                           │
-│                                          ok ────┴── fail (timeout 15s)      │
+│                                          ok ────┴── fail                    │
 │                                          │              │                   │
 │                                     [S3] NAV      [S4] WAITING              │
 │                                                         │                   │
 │                                              (MID=menu, ha opzione AP)      │
 │                                                         │                   │
-│                          (da menu) ──────────────► [S7] AP PORTAL           │
+│                          (da menu) ──────────────► [S7] AP INTERNO          │
 │                                                                             │
 │                          (da menu) ──────────────► [S8] CONFERMA            │
 │                                                                             │
@@ -27,6 +29,23 @@
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Feedback sonoro (buzzer)
+
+| Evento | Suono | Tono |
+|--------|-------|------|
+| Navigazione UP / DOWN | Bip corto (50 ms) | Acuto ~1500 Hz |
+| Conferma azione MID | Bip lungo (150 ms) | Medio ~1000 Hz |
+| Annulla / torna indietro EXT | Bip corto (80 ms) | Grave ~600 Hz |
+| WiFi connesso | 2 toni ascendenti | — |
+| WiFi fallito / errore | Bip doppio breve | Grave ~400 Hz |
+| Boot completato | Melodia boot (esistente) | — |
+
+> Il feedback sonoro conferma ogni comando anche quando il display e-ink
+> non ha ancora aggiornato (~250 ms) o quando la luce è scarsa.
+> I bip UP/DOWN possono essere disabilitati da config.
 
 ---
 
@@ -101,17 +120,65 @@
 
 ---
 
-## [S2] CONNECTING (tentativo connessione WiFi)
+## [S2] WiFi MENU (selezione connessione)
 
-> **Nota**: non è più raggiunto dal boot. Si entra da menu pagina 4
-> ("Connetti AP 1/2/3") o da menu EMERGENZA ("Connetti WiFi").
+> **Nota**: raggiunto dal boot (S0→S2 automatico) e dal menu EMERGENZA.
+> Permette di scegliere la rete o mantenere WiFi spento.
+
+**Durata**: `WIFI_MENU_TIMEOUT_S` secondi (default 60s, configurabile in config.h — auto-timeout → riprende ultima impostazione NVS)
+
+**Display**:
+```
+┌──────────────────────────────┐
+│           WiFi               │
+│──────────────────────────────│
+│  Seleziona connessione:      │
+│                              │
+│ ▸ [MiCasa 2.4G]    (AP1)    │
+│   [MiCasa 5G]      (AP2)    │
+│   [Mobile HotSpot] (AP3)    │
+│   Apri AP interno            │
+│   Mantieni WiFi OFF          │
+│                              │
+│──────────────────────────────│
+│ SU/GIU:scegli  MID:ok        │
+│ Timeout 60s: → ultimo usato  │
+└──────────────────────────────┘
+```
+
+**Bottoni**:
+| Bottone | Azione | Suono |
+|---|---|---|
+| UP | Opzione precedente | bip corto |
+| DOWN | Opzione successiva | bip corto |
+| MID | Conferma scelta | bip lungo |
+| EXT short | WiFi OFF → [S3] NAV | bip grave |
+| EXT long (3s) | → [S6] EMERGENZA | — |
+| Timeout (WIFI_MENU_TIMEOUT_S) | → [S3] NAV (ultima impostazione NVS) | — |
+
+**Transizioni**:
+| Condizione | Destinazione |
+|---|---|
+| AP1/AP2/AP3 selezionato + MID | → [S2c] CONNECTING |
+| "Apri AP interno" + MID | → [S7] AP INTERNO |
+| "Mantieni WiFi OFF" + MID | → [S3] NAV (offline) |
+| EXT short | → [S3] NAV (offline) |
+| Timeout (WIFI_MENU_TIMEOUT_S) | → [S3] NAV (usa ultima impostazione NVS) |
+| EXT long | → [S6] EMERGENZA |
+
+---
+
+## [S2c] CONNECTING (tentativo connessione WiFi)
+
+> **Nota**: raggiunto da [S2] WiFi MENU dopo selezione AP, o da [S6] EMERGENZA
+> con "Connetti WiFi" (usa credenziali NVS, salta il menu S2).
 
 **Durata**: max 15 secondi (WIFI_TIMEOUT_MS)
 
 **Display**:
 ```
 ┌──────────────────────────────┐
-│ EA5JDG-13 [WiFi...] v1.3  │
+│ EA5JDG-13 [WiFi...] v1.3   │
 │──────────────────────────────│
 │                              │
 │   Connessione WiFi...        │
@@ -126,8 +193,8 @@
 └──────────────────────────────┘
 ```
 
-> **Nota e-ink**: nessuna barra di progresso animata. L'aggiornamento del display
-> avviene all'inizio ("Connessione...") e alla fine (ok/fail). Nessun refresh durante i 15s.
+> **Nota e-ink**: nessuna barra di progresso animata. Il display si aggiorna
+> all'inizio e alla fine. Nessun refresh durante i 15s.
 
 **Bottoni**:
 | Bottone | Azione |
@@ -174,6 +241,7 @@
 - `[WiFi!]` = disconnesso, retry in corso
 - `[WiFi✗]` = nessuna credenziale / waiting
 - `[WiFi—]` = WiFi OFF
+- `[WiFiO]` = AP interno attivo (SoftAP, S7)
 
 **Bottoni**:
 | Bottone | Azione |
@@ -266,9 +334,9 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 | Azione eseguita | Destinazione |
 |---|---|
 | Azione semplice (leggi sensori, invia pkt) | → [S3] NAV |
-| "Apri portale AP" | → [S7] AP PORTAL |
+| "Apri AP interno" | → [S7] AP INTERNO |
 | Azione distruttiva (cancella log, reset) | → [S8] CONFERMA |
-| "Connetti ora" | → [S2] CONNECTING |
+| "Connetti ora" | → [S2c] CONNECTING |
 | EXT / timeout | → [S3] NAV |
 
 ---
@@ -284,9 +352,8 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 │──────────────────────────────│
 │                              │
 │  ▸ Connetti WiFi             │
-│    Apri portale AP           │
+│    Apri AP interno           │
 │    WiFi OFF                  │
-│    Reset credenziali WiFi    │
 │    Reboot                    │
 │                              │
 │                              │
@@ -307,22 +374,21 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 **Azioni del menu emergenza**:
 | # | Opzione | Effetto | Destinazione |
 |---|---------|---------|---|
-| 1 | Connetti WiFi | WiFi.begin() con credenziali salvate | → [S2] CONNECTING |
-| 2 | Apri portale AP | Avvia WiFiManager | → [S7] AP PORTAL |
+| 1 | Connetti WiFi | WiFi.begin() con credenziali NVS (salta S2) | → [S2c] CONNECTING |
+| 2 | Apri AP interno | Avvia WiFiManager SoftAP | → [S7] AP INTERNO |
 | 3 | WiFi OFF | WiFi.disconnect() + mode(OFF) | → [S3] NAV (offline) |
-| 4 | Reset credenziali | wm.resetSettings() | → [S8] CONFERMA prima |
-| 5 | Reboot | ESP.restart() | (riavvio) |
+| 4 | Reboot | ESP.restart() | (riavvio) |
 
 ---
 
-## [S7] AP PORTAL (WiFiManager captive portal)
+## [S7] AP INTERNO (WiFiManager captive portal)
 
 **Durata**: max 300 secondi (5 min), poi timeout
 
 **Display** (FISSO, non alterna con altre pagine):
 ```
 ┌──────────────────────────────┐
-│       WiFi Setup             │
+│       AP interno             │
 │──────────────────────────────│
 │                              │
 │  Connettiti a:               │
@@ -331,7 +397,7 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 │  Poi vai a:                  │
 │  192.168.4.1                 │
 │                              │
-│  Timeout: 287s               │  ← countdown
+│  Timeout: 280s               │  ← countdown a -10s
 │                              │
 │ EXT long: forza uscita       │
 └──────────────────────────────┘
@@ -352,7 +418,7 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 **Transizioni**:
 | Condizione | Destinazione |
 |---|---|
-| Utente salva config | → [S2] CONNECTING (con nuove credenziali) |
+| Utente salva config | → [S2c] CONNECTING (con nuove credenziali) |
 | Timeout 300s | → [S3] NAV (credenziali invariate) |
 | EXT long (interrupt) | → [S6] EMERGENZA oppure → [S3] NAV |
 
@@ -394,58 +460,47 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 
 ```
                     ┌──────┐
-        POWER ON───►│  S0  │ BOOT (3s auto)
+        POWER ON───►│  S0  │ BOOT (3s, carica profilo NVS)
                     │ BOOT │
                     └──┬───┘
                        │
                        ▼
                     ┌──────┐
-                    │  S1  │ PROFILI (5s / MID)
-                    │ PROF │
+                    │  S2  │ WiFi MENU (60s timeout → NVS)
+                    │ WiFi │
                     └──┬───┘
-                       │
-              ┌────────┴────────┐
-              │wifi_enabled     │!wifi_enabled
-              ▼                 ▼
-         ┌─────────┐      ┌─────────┐
-         │   S2    │      │   S3    │
-         │CONNECTNG│      │  NAV    │◄─────────────────────────┐
-         └────┬────┘      └────┬────┘                          │
-              │                │                               │
-         ┌────┴────┐          │                               │
-         │ok       │fail      │                               │
-         ▼         ▼          │                               │
-    ┌─────────┐ ┌──────┐     │                               │
-    │   S3    │ │  S4  │     │MID                            │
-    │  NAV    │ │WAITNG│─5s─►│                               │
-    └─────────┘ └──────┘     │                               │
-         │                    ▼                               │
-         │              ┌──────────┐    EXT short             │
-         │              │    S5    │───────────────────────────┘
-         │MID           │   MENU   │
-         │              └────┬─────┘
-         │                   │
-         └───────────────────┤
-                             │MID (esegui)
-                ┌────────────┼────────────────┐
-                │            │                │
-                ▼            ▼                ▼
-           ┌─────────┐ ┌─────────┐     ┌─────────┐
-           │   S2    │ │   S7    │     │   S8    │
-           │CONNECTNG│ │AP PORTAL│     │CONFERMA │
-           └─────────┘ └────┬────┘     └────┬────┘
-                            │                │
-                            │saved/timeout   │MID/EXT
-                            ▼                ▼
-                       ┌─────────┐      (azione o annulla)
-                       │ S2/S3   │
-                       └─────────┘
-
+              ┌────────┴──────────────────┐
+              │AP selezionato             │WiFi OFF / timeout
+              ▼                           ▼
+         ┌──────┐                   ┌─────────┐
+         │ S2c  │ CONNECTING (15s)  │   S3    │
+         │CONN. │                   │  NAV    │◄─────────────────┐
+         └──┬───┘                   └────┬────┘                  │
+         ┌────┴────┐                    │MID                     │
+         │ok  fail │                    ▼                        │
+         ▼    ▼                  ┌──────────┐   EXT short        │
+    ┌───┐ ┌──────┐               │    S5    │────────────────────┘
+    │S3 │ │  S4  │               │   MENU   │
+    │NAV│ │WAITNG│─5s►S3         └────┬─────┘
+    └───┘ └──────┘                    │MID (esegui)
+                       ┌──────────────┼──────────────┐
+                       │              │               │
+                       ▼              ▼               ▼
+                  ┌─────────┐  ┌─────────┐    ┌─────────┐
+                  │   S2c   │  │   S7    │    │   S8    │
+                  │CONNECT. │  │AP INTERN│    │CONFERMA │
+                  └─────────┘  └────┬────┘    └────┬────┘
+                                    │               │MID/EXT
+                                    │saved/timeout  ▼
+                                    ▼         (azione/annulla)
+                               ┌─────────┐
+                               │ S2c/S3  │
+                               └─────────┘
 
    ╔══════════════════════════════════════════════╗
    ║  EXT LONG (3s) = INTERRUPT da QUALSIASI S   ║
    ║                                              ║
-   ║  S0,S1,S2,S3,S4,S5,S7,S8 ──────► S6        ║
+   ║  S0,S2,S2c,S3,S4,S5,S7,S8 ──────► S6       ║
    ║                                  (EMERGENZA) ║
    ║                                              ║
    ║  S6 ── EXT short ──► S3 (NAV)               ║
@@ -454,18 +509,21 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 
 ---
 
-## Cosa succede al REBOOT (il dubbio di stamattina)
+## Cosa succede al REBOOT
 
 Dopo un RST o un reboot:
-1. **S0 BOOT** (3s) — mostra "Avvio..."
-2. **S1 PROFILI** (5s) — conferma o auto-conferma profilo
-3. **S2 CONNECTING** (15s) — **mostra chiaramente cosa sta facendo**:
-   - "Connessione a: MiRedDeCasa..."
-   - Barra progresso con countdown
-   - Se successo → S3 con buzzer
-   - Se fallisce → S4 "WiFi non disponibile, funzionamento offline"
+1. **S0 BOOT** (3s) — mostra "Avvio...", carica l'ultimo profilo NVS (o profilo 1 se primo avvio)
+2. **S2 WiFi MENU** (`WIFI_MENU_TIMEOUT_S` = 60s timeout, configurabile) — schermata di selezione WiFi:
+   - Utente presente: sceglie AP1/AP2/AP3, AP interno, o WiFi OFF
+   - Nessun input entro il timeout: riprende automaticamente l'ultima impostazione WiFi NVS
+3. **Se AP selezionato → S2c CONNECTING** (15s):
+   - Mostra "Connessione a: [SSID]..."
+   - Se successo → S3 con buzzer OK
+   - Se fallisce → S4 "WiFi non disponibile"
+4. **S3 NAV** — stato operativo normale
 
-**Il problema di stamattina**: dopo RST andava diretto in S2 ma senza display → non sapevi cosa stava facendo. Con questo schema, S2 ha un display dedicato che ti dice esattamente: "sto provando a connettermi a [SSID], 8s/15s...".
+> S1 PROFILI non è nel flusso di boot. Il profilo persiste tra i reboot via NVS.
+> Per cambiare profilo: naviga fino a pagina 3 → MID → menu → Cambia profilo.
 
 ---
 
@@ -473,9 +531,10 @@ Dopo un RST o un reboot:
 
 | Sei bloccato in... | Via d'uscita |
 |---|---|
-| S2 CONNECTING (non si connette) | Aspetta 15s → va a S4/S3 automaticamente |
-| S4 WAITING (offline) | MID → menu → "Apri AP" oppure EXT long → Emergenza |
-| S7 AP PORTAL (nessuno si connette) | EXT long (interrupt) → Emergenza |
-| S7 AP PORTAL (timeout) | Auto-esce dopo 300s → S3 |
+| S2 WiFi MENU (nessun input) | Timeout (WIFI_MENU_TIMEOUT_S, def 60s) → riprende ultima impostazione NVS |
+| S2c CONNECTING (non si connette) | Aspetta 15s → va a S4 automaticamente |
+| S4 WAITING (offline) | MID → menu → "Apri AP interno" oppure EXT long → Emergenza |
+| S7 AP INTERNO (nessuno si connette) | EXT long (interrupt) → Emergenza |
+| S7 AP INTERNO (timeout) | Auto-esce dopo 300s → S3 |
 | Loop freezato | RST (hardware) → riparte da S0 |
-| Qualsiasi stato con WiFi sbagliato | EXT long → Emergenza → "Reset credenziali" → Reboot |
+| Qualsiasi stato con WiFi sbagliato | EXT long → Emergenza → Reboot |

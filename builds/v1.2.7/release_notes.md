@@ -4,7 +4,9 @@ Fix precisione locator, display 10-char Maidenhead. Prima versione APRS-IS verif
 
 ---
 
-## Fix implementati (da buglist v1.2.6)
+## Fix implementati
+
+### Locator Maidenhead
 
 | # | Bug v1.2.6 | Fix v1.2.7 | Stato |
 |---|------------|------------|-------|
@@ -12,21 +14,107 @@ Fix precisione locator, display 10-char Maidenhead. Prima versione APRS-IS verif
 | 8 | Locator 6 char su display | `latlon_to_maidenhead()` calcola 10 char per visualizzazione | ✅ |
 | — | WiFiManager label locator | Indica "max 8 char", maxlength=10 | ✅ |
 
+### Bug critico: QMP6988 I2C lockup dopo GPS→ENV switch
+
+| # | Problema | Fix | Stato |
+|---|----------|-----|-------|
+| A | Dopo ore di uptime con switch GPS→ENV, QMP6988 restituisce pressione fissa `-33968` Pa (I2C risponde ma dati corrotti) | `readSensors()`: bounds check 500–1100 hPa; fuori range → `pressure=0` + `Wire.end/begin` + `qmp.begin()` | ✅ |
+| B | Stesso lockup può manifestarsi subito dopo lo switch | `switchPortMode()`: lettura di verifica post-switch; secondo reinit se fuori range | ✅ |
+| C | Pacchetti weather con `b-33968` trasmessi su APRS-IS | `aprs_build_weather_packet()`: campo `b` omesso se `pressure_hpa` fuori range | ✅ |
+
+### Telemetria — bit digitali
+
+| Bit | Maschera | Label PARM | Semantica | Stato |
+|-----|----------|------------|-----------|-------|
+| 7 | 0x80 | GPS | GPS fix valido | ✅ |
+| 6 | 0x40 | WiFi | WiFi associato (WL_CONNECTED) | ✅ |
+| 5 | 0x20 | Chg | Batteria in carica (slope>0 && !isOnUsb) | ⏳ |
+| 4 | 0x10 | TX | Ultimo pacchetto APRS inviato con successo | ✅ |
+| 3 | 0x08 | Err | Sensore ENV in errore (QMP reset attivo) | ⏳ |
+| 2 | 0x04 | LoRa | Modulo LoRa attivo (sempre 0 — dichiarato per v2.0) | ⏳ |
+| 1 | 0x02 | R2 | Riservato | — |
+| 0 | 0x01 | R3 | Riservato | — |
+
+### Vbat / rilevamento USB
+
+| # | Problema | Fix | Stato |
+|---|----------|-----|-------|
+| D | `batVoltage` riporta 5–6V con certi caricatori (backdrive body-diode FET sincrono SY7088) | `isOnUsb()`: soglia `batVoltage > 4.4f` per rilevare USB senza GPIO dedicato | ⏳ |
+| E | Bit Chg mai settato; slope detection non implementata | `detectChargeState()` su finestra `batSamples[]`; sospeso se `isOnUsb()==true` | ⏳ |
+
+### Documentazione
+
+| — | README: rimossi riferimenti a Bruce firmware; aggiunto link NOAA Solar Calculator | ✅ |
+|---|---|---|
+| — | `docs/power_analysis.md`: circuito reale con Q4/Q5, analisi backdrive SY7088, formula ADC | ✅ |
+
 ---
 
-## Bug noti v1.2.7 (da fixare in v1.2.8)
+## Da completare prima del rilascio v1.2.7
 
-| # | Bug | Impatto | Priorità |
-|---|-----|---------|----------|
-| 1 | Nessuna pagina web di configurazione | Solo OTA + CSV su :8080, no config via WiFi domestico | Alta |
-| 2 | Profili stazione hardcoded NOCALL | Non editabili, funzionalità morta | Alta |
-| 3 | SmartBeacon troppo aggressivo | Jitter GPS scatena TX ogni 20s da fermo | Alta |
-| 4 | MID breve non assegnato | Commutazione ENV↔GPS ancora solo su EXT | Media |
-| 5 | PARM/UNIT/EQNS ripetuti | Inviati ai primi 2 cicli meteo, non solo al boot | Media |
-| 6 | Weather inviato senza ENV III | Dati cached trasmessi anche con sensore scollegato | Media |
-| 7 | Commento posizione ridondante | Vbat+FW_VERSION già in telemetria/status | Bassa |
-| 8 | Schermo GPS ridondante | Mostra sia sat count che fix sì/no | Bassa |
-| 9 | BDS non mostrato | Satelliti BeiDou non visualizzati | Bassa |
+### Telemetria e batteria
+
+| # | Feature/Fix | Dettaglio | Stato |
+|---|-------------|-----------|-------|
+| D | `isOnUsb()` | `batVoltage > 4.4f`; backdrive SY7088 body-diode | ⏳ |
+| E | `detectChargeState()` | Slope su `batSamples[]`; sospeso se `isOnUsb()` | ⏳ |
+| F | Bit Chg (0x20) | `sendTelemetry()`: slope>0 && !isOnUsb | ⏳ |
+| G | Bit Err (0x08) | `sendTelemetry()`: `pressure==0.0f` (QMP reset attivo) | ⏳ |
+| H | PARM label R1→LoRa | Sempre 0; dichiarato per compatibilità v2.0 | ⏳ |
+
+### WiFi state machine e screen map (implementazione codice)
+
+| # | Feature | Dettaglio | Stato |
+|---|---------|-----------|-------|
+| I | FSM WiFi 6 stati | `WIFI_ST_OFF` default al boot | ⏳ |
+| J | Screen map aggiornata | S0→S3 NAV diretto; S1 solo da menu pagina 3 | ⏳ |
+| K | Menu emergenza EXT long press | ISR per accesso rapido al menu | ⏳ |
+
+### Web server
+
+| # | Feature | Dettaglio | Stato |
+|---|---------|-----------|-------|
+| L | Web server su AP domestico | OTA + config su IP locale (STA mode) | ⏳ |
+| M | Web server su AP interno | OTA + config su 192.168.4.1 (SoftAP) | ⏳ |
+| N | Pagina `/config` | Form HTML GET/POST su `http://<IP>:8080/config` | ⏳ |
+| O | Profili editabili | Risolve NOCALL hardcoded; config singola NVS | ⏳ |
+| P | Export/Import config | JSON via `/config/export` e `/config/import` | ⏳ |
+| Q | Reboot remoto | POST `/reboot` | ⏳ |
+
+**Campi form `/config`:**
+- Callsign + SSID APRS (0–15)
+- Passcode APRS-IS
+- Locatore Maidenhead (max 8 char)
+- Simbolo APRS (2 char: table + code)
+- Messaggio Status APRS
+- Intervallo meteo, status, telemetria (sec)
+- Refresh display (sec)
+- Volume buzzer (0–100), melodia boot (0–5)
+- Porta mode (ENV/GPS)
+
+### Pulsanti ridefiniti
+
+| Pulsante | Azione | Stato |
+|----------|--------|-------|
+| UP | Pagina precedente | ⏳ |
+| DOWN | Pagina successiva | ⏳ |
+| MID breve | Commutazione ENV↔GPS | ⏳ |
+| MID lungo 3s | WiFiManager (AP mode) | ⏳ |
+| EXT breve | TX forzato immediato | ⏳ |
+| EXT lungo | Menu emergenza (WiFi FSM) | ⏳ |
+| DOWN al boot | Reset credenziali WiFi | ⏳ |
+
+### Bug noti v1.2.6 da risolvere
+
+| # | Bug | Impatto | Stato |
+|---|-----|---------|-------|
+| 3 | SmartBeacon aggressivo | Filtro Δ<50m, `SB_FAST_RATE`=120s | ⏳ |
+| 4 | MID breve non assegnato | Tasto centrale breve → ENV↔GPS | ⏳ |
+| 5 | PARM/UNIT/EQNS ripetuti | Solo al boot | ⏳ |
+| 6 | Weather senza ENV III | Skip se sensore scollegato | ⏳ |
+| 7 | Commento posizione ridondante | Rimuovere/semplificare | ⏳ |
+| 8 | Schermo GPS ridondante | Unificare sat count e fix | ⏳ |
+| 9 | BDS non mostrato | Aggiungere BeiDou al conteggio | ⏳ |
 
 ---
 

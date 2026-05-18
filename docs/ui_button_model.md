@@ -8,13 +8,15 @@
 
 ## Hardware disponibile (CoreInk)
 
-| Bottone | Posizione | Identificatore |
-|---------|-----------|----------------|
-| EXT | Superiore (fisico) | M5.BtnEXT |
-| UP | Joy su | M5.BtnUP |
-| DOWN | Joy giù | M5.BtnDOWN |
-| MID | Joy centro (press) | M5.BtnMID |
-| PWR | Laterale | Non usato per UI |
+| Bottone | Posizione fisica | GPIO | Identificatore libreria |
+|---------|-----------------|------|-------------------------|
+| EXT | Pannello frontale (User Button) | GPIO5 | `M5.BtnEXT` |
+| UP | Dial Up (joystick su) | GPIO37 | `M5.BtnUP` |
+| DOWN | Dial Down (joystick giù) | GPIO39 | `M5.BtnDOWN` |
+| MID | Dial Middle (joystick centro press) | GPIO38 | `M5.BtnMID` |
+| PWR | Laterale | GPIO12 | `M5.BtnPWR` — via BM8563 PS_EN |
+| RST | Posteriore | — (EN pin) | hardware reset, nessun GPIO |
+
 
 ---
 
@@ -105,7 +107,9 @@ Quando si entra nel menu di una pagina, il display mostra:
 
 ## Menu contestuali per pagina
 
-### Pagina 0 — Principale (Meteo + posizione)
+> **Nomenclatura**: le pagine di navigazione (P0–P8) sono le schermate all'interno dello stato **[S3] NAV** della state machine. Non vanno confuse con gli stati FSM (S0, S2, S2c, S3…) documentati in `screen_map.md`.
+
+### P0 — Principale (Meteo + posizione)
 
 | # | Opzione | Azione |
 |---|---------|--------|
@@ -114,7 +118,7 @@ Quando si entra nel menu di una pagina, il display mostra:
 | 3 | Invia posizione | sendPositionPacket() immediato |
 | 4 | Cambia porta ENV/GPS | switchPortMode() |
 
-### Pagina 1 — GPS Dettaglio
+### P1 — GPS Dettaglio
 
 | # | Opzione | Azione |
 |---|---------|--------|
@@ -122,14 +126,14 @@ Quando si entra nel menu di una pagina, il display mostra:
 | 2 | Cold start GPS | Reinit serial, reset fix |
 | 3 | Invia posizione GPS | sendPositionPacket() |
 
-### Pagina 2 — SNR Satelliti
+### P2 — SNR Satelliti
 
 | # | Opzione | Azione |
 |---|---------|--------|
 | 1 | Vista barre/lista | Toggle visualizzazione |
 | 2 | Attiva GPS | switchPortMode(GPS) se non attivo |
 
-### Pagina 3 — Profili + NVS
+### P3 — Profili + NVS
 
 | # | Opzione | Azione |
 |---|---------|--------|
@@ -138,32 +142,35 @@ Quando si entra nel menu di una pagina, il display mostra:
 | 3 | Profilo 3 (Remota) | Cambia profilo attivo, salva NVS |
 | 4 | Ricarica NVS | Re-read tutti i parametri da NVS |
 
-### Pagina 4 — WiFi ⭐ (la più importante per lo state machine)
+### P4 — WiFi ⭐ (la più importante per la state machine)
 
 | # | Opzione | Azione |
 |---|---------|--------|
 | 1 | Connetti ora | Forza WIFI_ST_CONNECTING immediato |
 | 2 | Disconnetti | WiFi.disconnect(), stato → WAITING |
-| 3 | Apri portale AP | Entra in WIFI_ST_AP_CONFIG |
+| 3 | Apri AP interno | Entra in WIFI_ST_AP_CONFIG |
 | 4 | Info connessione | Mostra SSID/IP/RSSI dettagliato |
 | 5 | WiFi ON/OFF | Toggle wifiEnabled, salva NVS |
 
-### Pagina 5 — Bluetooth
+### P5 — Bluetooth
+
+> **Stato v1.2.7**: BLE forzato disabilitato a compile-time (`#define BLE_ENABLED 0`). Questa pagina è presente nel display ma le azioni non hanno effetto. Implementazione pianificata per versione futura.
 
 | # | Opzione | Azione |
 |---|---------|--------|
-| 1 | BLE ON/OFF | Toggle, restart BLE se necessario |
-| 2 | Restart BLE adv | Riavvia advertising |
+| 1 | BLE ON/OFF | Toggle, restart BLE se necessario *(non attivo v1.2.7)* |
+| 2 | Restart BLE adv | Riavvia advertising *(non attivo v1.2.7)* |
 
-### Pagina 6 — Meteo avanzato
+### P6 — Sensori ENV/GPS
 
 | # | Opzione | Azione |
 |---|---------|--------|
-| 1 | Forza lettura | readSensors() doppia |
-| 2 | Cambia porta | switchPortMode() toggle |
-| 3 | Offset temp (future) | Calibrazione ±0.5°C |
+| 1 | Forza lettura | readSensors() doppia (warmup) |
+| 2 | Commuta ENV↔GPS | switchPortMode() toggle |
+| 3 | Reset sensore ENV | Wire.end()/Wire.begin(32,33) + qmp.begin() — forza recupero I2C |
+| 4 | Offset temp (future) | Calibrazione ±0.5°C |
 
-### Pagina 7 — Astro
+### P7 — Astro
 
 | # | Opzione | Azione |
 |---|---------|--------|
@@ -171,7 +178,9 @@ Quando si entra nel menu di una pagina, il display mostra:
 | 2 | Giorno +1 | Preview giorno successivo |
 | 3 | Giorno -1 | Preview giorno precedente |
 
-### Pagina 8 — Data Logger
+### P8 — Data Logger
+
+> **Stato v1.2.7**: modulo `data_logger.cpp` non ancora attivo. La pagina è visibile ma il menu mostrerà "Non disponibile" fino all'implementazione. In arrivo nella v1.2.7.
 
 | # | Opzione | Azione |
 |---|---------|--------|
@@ -296,11 +305,11 @@ void loop() {
 
 ## Interazione con WiFi State Machine
 
-Il menu della pagina WiFi (pagina 4) è il punto dove l'utente **interviene manualmente** sullo stato WiFi:
+Il menu della pagina WiFi (P4) è il punto dove l'utente **interviene manualmente** sullo stato WiFi:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  PAGINA 4 (WiFi) + MENU CONTESTUALE                │
+│  P4 (WiFi) + MENU CONTESTUALE                      │
 │                                                     │
 │  Opzione "Connetti ora"                             │
 │    → wifiState = WIFI_ST_CONNECTING                 │
@@ -311,7 +320,7 @@ Il menu della pagina WiFi (pagina 4) è il punto dove l'utente **interviene manu
 │    → WiFi.disconnect()                              │
 │    → wifiState = WIFI_ST_WAITING                    │
 │                                                     │
-│  Opzione "Apri portale AP"                          │
+│  Opzione "Apri AP interno"                           │
 │    → wifiStatePrev = wifiState                      │
 │    → wifiState = WIFI_ST_AP_CONFIG                  │
 │    → startWiFiManager()                             │
@@ -331,7 +340,7 @@ L'utente naviga alla pagina WiFi, apre il menu, e sceglie cosa fare.
 ## Flusso visivo completo
 
 ```
-BOOT → selectProfile (5s) → NAVIGAZIONE pagina 0
+BOOT → [S0] → [S2] WiFi MENU → [S3] NAVIGAZIONE P0
                                     │
          ┌──────────────────────────┼──────────────────────────┐
          │                          │                          │
@@ -339,7 +348,7 @@ BOOT → selectProfile (5s) → NAVIGAZIONE pagina 0
     cambia pagina         entra menu pagina          quick refresh
          │                          │
          ▼                          ▼
-    Pagina 0..8              ┌─── MENU ───┐
+    P0..P8                   ┌─── MENU ───┐
                              │ ▸ Opzione 1 │
                              │   Opzione 2 │
                              │   Opzione 3 │
@@ -367,6 +376,7 @@ verrà eliminato nella prossima refactor.
 ## Note di design
 
 1. **E-ink e refresh**: ogni cambio pagina/menu = refresh completo (0.82s). Per la navigazione manuale è accettabile — l'utente non preme un tasto ogni <15s in modo continuativo. Non fare refresh automatici ravvicinati nel loop.
+   **Partial refresh (0.24s)**: supportato dall'hardware (JD79653), ma la libreria M5Core-Ink **non lo espone** — ogni `pushSprite()` è sempre full refresh. Implementarlo richiederebbe comandi SPI diretti al JD79653. Utile in futuro per aggiornare solo l'header (WiFi, batteria, ora) senza riffare tutto lo schermo. Regola: max 5 partial consecutivi prima di 1 full refresh. Analisi completa → [`docs/eink_analysis.md`](eink_analysis.md).
 2. **Footer fisso**: in NAVIGAZIONE mostrare `[MID:menu]` in basso. In MENU mostrare `[SU/GIU MID:ok EXT:←]`.
 3. **Nessuna azione distruttiva senza CONFERMA**: "Reset credenziali" e "Reboot" richiedono sempre conferma MID.
 4. **Menu vuoto**: se una pagina non ha azioni, MID mostra "Nessuna azione" per 2s e torna.

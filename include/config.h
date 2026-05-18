@@ -129,6 +129,7 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define TELEMETRY_INTERVAL_MS 600000 // Telemetria ogni 10 minuti
 #define POSITION_INTERVAL_MS 0       // 0 = solo al boot se posizione fissa (no GPS)
 #define WIFI_TIMEOUT_MS 15000        // Timeout connessione WiFi
+#define WIFI_MENU_TIMEOUT_S 60       // Timeout schermata selezione WiFi al boot (S2)
 
 // === Display ===
 #define DISPLAY_UPDATE_MS 60000   // Aggiornare il display ogni minuto

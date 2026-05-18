@@ -11,7 +11,70 @@
 | v1.2.5 | Refactor build LITE (partizione default.csv, senza BLE/logger/gps_extra) | 2026-05-17 |
 | v1.2.6 | Fix WiFiManager (watchdog, salvataggio, timeout), display, LED, intervalli TX | 2026-05-17 |
 | v1.2.7 | Fix locator Maidenhead 8-char, display 10-char, prima APRS-IS operativa | 2026-05-18 |
-| v1.3 | Moduli avanzati: buzzer, LED, data logger, GPS+, astro, BLE OTA, partizioni custom | 2026-05-17 |
+| v1.3 | Mod hardware HAT dual-sensor (ENV III + GPS simultanei), Grove libero; navigazione, display multi-pagina, data logger | 2026-05-17 |
+
+---
+
+## v1.2.7 — In sviluppo (patch critica QMP6988 + telemetria)
+
+### Bug fix già implementati nel codice (commit pendente)
+
+- [x] QMP6988: bounds check pressione (500–1100 hPa) in `readSensors()`; fuori range → `pressure=0` + Wire reset + `qmp.begin()`
+- [x] QMP6988: verifica pressione post-switch GPS→ENV in `switchPortMode()`; secondo reinit se fuori range
+- [x] `aprs_build_weather_packet()`: omette campo `b` se `pressure_hpa` fuori range (evita `b-33968` in aria)
+- [x] README: rimossi riferimenti a Bruce firmware; aggiunto link NOAA Solar Calculator
+
+### Da implementare nel codice (questa versione)
+
+- [ ] `isOnUsb()`: rileva USB collegata tramite soglia ADC `batVoltage > 4.4f`
+  *(backdrive body-diode FET sincrono SY7088 → vedi `docs/power_analysis.md`)*
+- [ ] `detectChargeState()`: slope algorithm su finestra `batSamples[]`;
+  sospendere quando `isOnUsb() == true`
+- [ ] Bit telemetria **Chg** (bit 5, 0x20): settare in `sendTelemetry()` se
+  `detectChargeState()==CHARGING && !isOnUsb()`
+- [ ] Bit telemetria **Err** (bit 3, 0x08): settare se sensore ENV in errore
+  (`pressure == 0.0f` per QMP reset attivo)
+- [ ] Telemetria PARM/UNIT: rinominare R1→**LoRa** (sempre 0 fino a v2.0;
+  dichiarato ora per compatibilità futura con iGate LoRa)
+
+### WiFi state machine e screen map (implementazione codice)
+
+> Design già documentato in `docs/wifi_state_machine.md`, `docs/ui_button_model.md`, `docs/screen_map.md`
+
+- [ ] Implementare FSM WiFi a 6 stati (`WIFI_ST_OFF` default al boot)
+- [ ] Screen map aggiornata: S0→S3 NAV diretto (WiFi OFF al boot)
+- [ ] Menu emergenza via EXT long press (ISR)
+- [ ] Pagina S1 PROFILI accessibile solo da menu pagina 3
+
+### Web server — accessibilità completa
+
+- [ ] Web server (OTA + config) attivo sia su **AP domestico** (STA mode, IP locale)
+  che su **AP interno** (SoftAP WiFiManager, 192.168.4.1)
+- [ ] Pagina `/config`: modifica callsign, locator, SSID, passcode, intervalli TX
+- [ ] Profili stazione editabili via web (risolve bug #2 NOCALL hardcoded)
+
+### Bug dalla v1.2.6 da risolvere in v1.2.7
+
+- [ ] **SmartBeacon aggressivo** (#3): filtro delta <50m da fermo; `SB_FAST_RATE` = 120s minimo
+- [ ] **MID breve non assegnato** (#4): tasto centrale breve → commutazione ENV↔GPS
+- [ ] **PARM/UNIT/EQNS ripetuti** (#5): inviare solo al boot (non ai primi 2 cicli)
+- [ ] **Weather senza ENV III** (#6): skip invio se sensore scollegato / dati non aggiornati
+- [ ] **Commento posizione ridondante** (#7): rimuovere o semplificare
+- [ ] **Schermo GPS ridondante** (#8): unificare sat count e fix in unica riga
+- [ ] **BDS non mostrato** (#9): aggiungere satelliti BeiDou al conteggio display
+
+### Mappa bit telemetria definitiva (v1.2.7)
+
+| Bit | Maschera | PARM label | Semantica | Stato |
+|-----|----------|------------|-----------|-------|
+| 7 | 0x80 | GPS | GPS fix valido (`isValid && isUpdated`) | ✅ |
+| 6 | 0x40 | WiFi | WiFi associato (`WL_CONNECTED`) | ✅ |
+| 5 | 0x20 | Chg | Batteria in carica (slope>0 && !isOnUsb) | ⏳ |
+| 4 | 0x10 | TX | Ultimo pacchetto APRS inviato con successo | ✅ |
+| 3 | 0x08 | Err | Sensore ENV in errore (QMP reset attivo) | ⏳ |
+| 2 | 0x04 | LoRa | Modulo LoRa attivo (sempre 0 fino a v2.0) | ⏳ |
+| 1 | 0x02 | R2 | Riservato | — |
+| 0 | 0x01 | R3 | Riservato | — |
 
 ---
 
@@ -68,7 +131,13 @@ raffinato con calma nelle versioni 2.1, 2.2 ecc.
 
 ### iGate / Digipeater LoRa
 
-- Ricezione pacchetti APRS via LoRa (430 MHz)
+> **Prerequisito**: mod hardware HAT v1.3 — G13/G14 sul connettore M5-Bus diventano
+> liberi per LoRa UART; Grove Port A (G32/G33) resta libero per RF433.
+
+- Modulo consigliato: EBYTE E32-433T20D o E22-400M30S (SX1278/SX1262, interfaccia UART)
+  collegato su **M5-Bus G13(RX)/G14(TX)** via `Serial1.begin(9600, SERIAL_8N1, 13, 14)`
+- Alternativa SPI: SX1278 Ra-02 su SPI condiviso display (G18/G23/G34) con CS su G13 —
+  più veloce ma richiede serializzazione SPI display+LoRa
 - Inoltro a APRS-IS (iGate RX)
 - Digipeater locale (ripetizione senza internet)
 - Filtro pacchetti per area/nominativo
@@ -126,6 +195,17 @@ raffinato con calma nelle versioni 2.1, 2.2 ecc.
 
 Versione maggiore: sistema di navigazione completo con display paginato, registrazione dati,
 informazioni astro-nautiche, e ottimizzazione firmware.
+
+### Mod hardware HAT dual-sensor (prerequisito per v2.0 LoRa)
+
+Cavo adattatore custom FPC 10-pin → 2×Grove che collega ENV III e GPS al connettore HAT J1,
+liberando Grove Port A per il modulo LoRa UART in v2.0.
+
+- ENV III (SHT30 + QMP6988) su **Wire1** (G25=SDA, G26=SCL)
+- GPS (AT6558 NMEA) su **Serial2** (G36=RX, TX non connesso)
+- Grove Port A (G32/G33) **libero** → riservato LoRa v2.0
+- Rimozione completa di `portMode`, `switchPortMode()`, hot-swap e relativi menu
+- Dettaglio tecnico: [hw\_configuration.md — Mod hardware v1.3](hw_configuration.md)
 
 ### Bugfix da v1.2
 

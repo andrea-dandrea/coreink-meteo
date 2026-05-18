@@ -77,7 +77,7 @@ Modificare `include/config.h` con i propri dati:
 
 ## Aggiornamento firmware OTA
 
-Dopo il primo flash (via USB o Bruce firmware), il dispositivo supporta aggiornamento over-the-air:
+Dopo il primo flash via USB, il dispositivo supporta aggiornamento over-the-air:
 
 ### WiFi (3 metodi)
 
@@ -92,11 +92,6 @@ Dopo il primo flash (via USB o Bruce firmware), il dispositivo supporta aggiorna
 3. Inviare alla caratteristica CMD: `0x01` + 4 byte dimensione firmware (little-endian)
 4. Scrivere i chunk del .bin sulla caratteristica DATA (write-no-response)
 5. Inviare alla caratteristica CMD: `0x02` per finalizzare
-
-### Bootstrap iniziale (Bruce firmware)
-
-Se il CoreInk ha già installato il firmware **Bruce**, è possibile usare la sua funzione OTA
-per caricare il primo .bin di coreink-meteo senza necessità di USB funzionante.
 
 ## Profili
 
@@ -228,4 +223,4 @@ Questo progetto è realizzato nello spirito di condivisione della comunità radi
 | [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus)               | Mikal Hart        | GNU LGPL v2.1          |
 | [WiFiManager](https://github.com/tzapu/WiFiManager)                   | tzapu             | MIT                    |
 | [ESP32 Arduino Framework](https://github.com/espressif/arduino-esp32) | Espressif Systems | LGPL v2.1 / Apache 2.0 |
-| NOAA Solar Calculator                                                 | U.S. NOAA / ESRL  | Pubblico dominio       |
+| [NOAA Solar Calculator](https://gml.noaa.gov/grad/solcalc/)          | U.S. NOAA / ESRL  | Pubblico dominio       |
