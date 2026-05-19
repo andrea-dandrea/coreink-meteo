@@ -1,6 +1,6 @@
 # CoreInk-Meteo — Manuale Utente
 
-**Versione**: v1.3 (in sviluppo)  
+**Versione**: v1.2.8 (coreink_lite)  
 **Autori**: EA5JDG / IZ3ARR  
 **Hardware**: M5Stack CoreInk + ENV III + GPS/BDS (AT6558)
 
@@ -91,16 +91,17 @@ Per riaprire il portale di configurazione WiFi: **tenere premuto MID per 3 secon
 
 ## 5. Navigazione display <a name="navigazione-display"></a>
 
-### Comandi joystick
+### Comandi pulsanti
 
 | Azione | Funzione |
 |--------|----------|
 | SU | Pagina precedente |
 | GIÙ | Pagina successiva |
-| MID (pressione breve) | Commutazione modo ENV↔GPS |
-| MID (pressione lunga 3s) | Apre portale WiFiManager |
-| EXT (pulsante fisico sopra) | Libero / TX forzato (futuro) |
-| DOWN al boot | Reset credenziali WiFi |
+| MID (pressione breve) | Funzione contestuale: pagina 7 → apre menu; altre → non assegnato |
+| MID (pressione lunga 3 s) | Apre portale WiFiManager (da pagina 5) o selezione profilo (da pagina 4, 5 s) |
+| EXT (pressione breve) | Nessuna azione |
+| EXT (pressione lunga 3 s) | Modo emergenza (segnale APRS di aiuto) |
+| DOWN al boot | Reset credenziali WiFiManager |
 
 ### Indicatore pagina
 
@@ -110,87 +111,93 @@ Il numero della pagina corrente appare in alto al centro del display.
 
 ## 6. Pagine display <a name="pagine-display"></a>
 
-### Pagina 1 — Principale
+Il display e-ink mostra 9 pagine, navigabili con SU/GIÙ. Il numero pagina
+corrente (es. `3/9`) appare nell'header in alto a sinistra.
 
-Dati meteo e posizione in tempo reale:
-- Nominativo e versione FW
-- Temperatura, umidità, pressione
-- Batteria, IP
-- Altitudine, velocità, rotta
-- Numero satelliti, locatore
-- Stato ultimo TX (ora + OK/FAIL)
+### Pagina 1 — Principale (case 0)
 
-### Pagina 2 — Satelliti GPS
+Dati meteo e stato stazione in tempo reale:
+- Temperatura, umidità, pressione atmosferica (in mbar)
+- Batteria con warning visivo (`LOW` <3.5 V, `!!!` <3.3 V)
+- Localizzatore Maidenhead o coordinate GPS (alternano ad ogni aggiornamento)
+- Altitudine, velocità, rotta (solo se GPS attivo e fix valido)
+- Satelliti e HDOP (solo se GPS)
+- Stato WiFi: IP address o "WiFi OFF"
+- Stato ultimo TX: orario + OK/FAIL
+- Header fisso: callsign-SSID a sinistra, versione FW e ora in alto a destra
 
-Dettaglio qualità fix:
-- Satelliti GPS usati/visibili
-- Satelliti BeiDou usati/visibili
-- HDOP, PDOP, VDOP
-- Tipo fix (2D/3D/nessuno)
-- Accuratezza stimata
+### Pagina 2 — GPS Dettaglio (case 1)
 
-### Pagina 3 — Segnale satelliti (SNR)
+Informazioni dettagliate GPS:
+- Fix SI/NO, numero satelliti, altitudine, HDOP
+- Velocità e rotta
+- Coordinate decimali e locatore Maidenhead
+- Se GPS non attivo: messaggio "Vai a pag.7, premi MID per GPS"
 
-Potenza segnale per ogni satellite visibile:
-- Barre grafiche con valore dB per satellite
-- Separazione GPS / BeiDou
+### Pagina 3 — Stato (case 2)
 
-### Pagina 4 — Profili
+Diagnostica stazione:
+- Batteria con warning visivo
+- Uptime (formato `Xh Ym`)
+- SSID WiFi connesso / "non connesso"
+- IP address, RSSI
+- Orario e stato ultimo TX (OK/FAIL)
 
-Selezione profilo stazione APRS:
-- Lista 3 profili con callsign e SSID
-- MID = seleziona profilo attivo
-- Visualizzazione callsign/passcode/locator attivi (da NVS)
+### Pagina 4 — Profili + NVS (case 3)
 
-### Pagina 5 — WiFi
+Visualizza la configurazione attiva:
+- Lista dei 3 profili con indicatore del profilo attivo (`>`)
+- Locatore Maidenhead attivo (da NVS)
+- Simbolo APRS attivo (tabella + codice)
+- `MID 5s`: riapre la selezione profilo
 
-Gestione connettività WiFi:
-- Stato: ON/OFF, Boot: ON/OFF
-- SSID connesso, IP, RSSI
-- Lista AP disponibili (scan)
-- MID = connetti ad AP selezionato o toggle WiFi on/off
+### Pagina 5 — WiFi (case 4)
 
-### Pagina 6 — Bluetooth
+Stato connettività WiFi:
+- Stato ON/OFF
+- SSID, IP, RSSI (se connesso)
+- mDNS hostname (`coreink-meteo.local`)
+- URL aggiornamento OTA (`http://<IP>:8080/update`)
+- `MID 3s`: apre portale WiFiManager
 
-Gestione BLE:
-- Stato: ON/OFF, Boot: ON/OFF
-- Nome dispositivo BLE
-- Stato OTA BLE
-- MID = toggle BT on/off
+### Pagina 6 — Bluetooth (case 5)
 
-### Pagina 7 — Meteo e Venti
+Stato BLE:
+- In build `coreink_lite`: "BLE OTA: Off" (modulo disabilitato)
+- In build completa: stato OTA BLE, nome dispositivo, istruzioni nRF Connect
 
-Previsione meteo da OpenWeatherMap:
-- Meteo attuale + previsione +3h, +6h, domani
-- Vento: direzione, velocità, raffica
-- Indice UV
-- Trend pressione (↑↓→ da storico locale)
+### Pagina 7 — Meteo (case 6)
 
-### Pagina 8 — Astro e Maree
+Dati meteo con controlli:
+- Temperatura, umidità, pressione (etichette estese)
+- Porta attiva: ENV III o GPS
+- `MID`: apre menu contestuale (timeout 10 s):
+  - `1. Forza lettura` — rilettura immediata sensori ENV (doppio campionamento)
+  - `2. Commuta ENV/GPS` — toggle porta con salvataggio NVS
+- Hint: `EXT 3s: emergenza`
 
-Informazioni astro-nautiche:
-- Alba e tramonto (calcolo offline)
+### Pagina 8 — Astro (case 7)
+
+Calcoli astronomici (offline, da posizione NVS o GPS):
+- Alba e tramonto (ora locale)
 - Durata del giorno
-- Fase lunare e % illuminazione
-- Prossima luna piena/nuova
-- Maree: alte e basse con orari e altezza (porto configurabile)
+- Fase lunare (nome e numero giorno 0–29)
+- Data corrente
 
-### Pagina 9 — Recorder
+### Pagina 9 — Info (case 8)
 
-Stato registrazione dati:
-- Stato: REC / STOP
-- Intervallo campionamento
-- Numero record memorizzati
-- Spazio usato / totale
-- Data primo e ultimo record
-- URL download
-- MID = start/stop registrazione
+Informazioni sistema:
+- Uptime totale (`Xh Ym`)
+- In build con data logger: stato registrazione, record memorizzati, URL download CSV
 
 ---
 
 ## 7. Parametri configurabili <a name="parametri-configurabili"></a>
 
 Tutti i parametri sono salvati in NVS (persistenti tra riavvii e aggiornamenti OTA).
+
+> **Nota build `coreink_lite`**: i parametri Buzzer, Data Logger, BLE e API esterne
+> non sono attivi nella build corrente (v1.2.8). Saranno disponibili in v1.3.
 
 ### Stazione APRS
 
@@ -306,7 +313,9 @@ AT6558 + MAX2659 (M5Stack GPS/BDS Unit), comunicazione UART 9600 baud.
 
 ---
 
-## 10. Data Logger <a name="data-logger"></a>
+## 10. Data Logger *(v1.3)* <a name="data-logger"></a>
+
+> *Funzionalità non disponibile in `coreink_lite` (v1.2.8). Disponibile in v1.3.*
 
 ### Formato record (30 bytes)
 
@@ -342,7 +351,9 @@ AT6558 + MAX2659 (M5Stack GPS/BDS Unit), comunicazione UART 9600 baud.
 
 ---
 
-## 11. Buzzer e audio <a name="buzzer"></a>
+## 11. Buzzer e audio *(v1.3)* <a name="buzzer"></a>
+
+> *Funzionalità non disponibile in `coreink_lite` (v1.2.8). Disponibile in v1.3.*
 
 Buzzer passivo su GPIO2. Suoni via PWM con frequenza e durata variabili.
 
@@ -365,9 +376,8 @@ Buzzer passivo su GPIO2. Suoni via PWM con frequenza e durata variabili.
 
 | Modalità | Consumo |
 |----------|---------|
-| Tutto attivo (WiFi + BT + GPS + display) | ~180 mA |
-| WiFi OFF | -80 mA |
-| BT OFF | -30 mA |
+| WiFi + GPS + display | ~150 mA |
+| WiFi OFF | ~70 mA |
 | Display sleep (e-ink ritiene immagine) | -5 mA |
 
 ### Batteria
@@ -384,7 +394,9 @@ determinano se si riattivano automaticamente dopo un reboot.
 
 ---
 
-## 13. API esterne <a name="api-esterne"></a>
+## 13. API esterne *(v1.3)* <a name="api-esterne"></a>
+
+> *Funzionalità non disponibile in `coreink_lite` (v1.2.8). Disponibile in v1.3.*
 
 ### OpenWeatherMap (previsioni meteo)
 

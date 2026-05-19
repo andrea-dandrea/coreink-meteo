@@ -11,64 +11,51 @@
 | v1.2.5 | Refactor build LITE (partizione default.csv, senza BLE/logger/gps_extra) | 2026-05-17 |
 | v1.2.6 | Fix WiFiManager (watchdog, salvataggio, timeout), display, LED, intervalli TX | 2026-05-17 |
 | v1.2.7 | Fix locator Maidenhead 8-char, display 10-char, prima APRS-IS operativa | 2026-05-18 |
-| v1.3 | Mod hardware HAT dual-sensor (ENV III + GPS simultanei), Grove libero; navigazione, display multi-pagina, data logger | 2026-05-17 |
+| v1.2.8 | Bug fixes post-campo (BUG-01..12), boot splash, WiFi round-robin e timeout 8 s | 2026-05-20 |
 
 ---
 
-## v1.2.7 — In sviluppo (patch critica QMP6988 + telemetria)
+## v1.3 — In sviluppo (telemetria avanzata + WiFi FSM + web config)
 
-### Bug fix già implementati nel codice (commit pendente)
-
-- [x] QMP6988: bounds check pressione (500–1100 hPa) in `readSensors()`; fuori range → `pressure=0` + Wire reset + `qmp.begin()`
-- [x] QMP6988: verifica pressione post-switch GPS→ENV in `switchPortMode()`; secondo reinit se fuori range
-- [x] `aprs_build_weather_packet()`: omette campo `b` se `pressure_hpa` fuori range (evita `b-33968` in aria)
-- [x] README: rimossi riferimenti a Bruce firmware; aggiunto link NOAA Solar Calculator
-
-### Da implementare nel codice (questa versione)
+### Batteria e alimentazione
 
 - [ ] `isOnUsb()`: rileva USB collegata tramite soglia ADC `batVoltage > 4.4f`
   *(backdrive body-diode FET sincrono SY7088 → vedi `docs/power_analysis.md`)*
-- [ ] `detectChargeState()`: slope algorithm su finestra `batSamples[]`;
-  sospendere quando `isOnUsb() == true`
-- [ ] Bit telemetria **Chg** (bit 5, 0x20): settare in `sendTelemetry()` se
-  `detectChargeState()==CHARGING && !isOnUsb()`
-- [ ] Bit telemetria **Err** (bit 3, 0x08): settare se sensore ENV in errore
-  (`pressure == 0.0f` per QMP reset attivo)
-- [ ] Telemetria PARM/UNIT: rinominare R1→**LoRa** (sempre 0 fino a v2.0;
-  dichiarato ora per compatibilità futura con iGate LoRa)
-- [ ] **Shutdown critico batteria**: se `!isOnUsb() && batVoltage < BAT_CRITICAL_THRESHOLD_V (3.2V)`
-  → `M5.shutdown()` immediato; warning buzzer bassa batteria a 3.5V (era 3.3V)
+- [ ] `detectChargeState()`: slope algorithm su finestra `batSamples[]`
+- [ ] Bit telemetria **Chg** (bit 5, 0x20): settare se `detectChargeState()==CHARGING && !isOnUsb()`
+- [ ] Bit telemetria **Err** (bit 3, 0x08): settare se sensore ENV in errore (`pressure == 0.0f`)
+- [ ] Telemetria PARM/UNIT: rinominare R1→**LoRa** (sempre 0 fino a v2.0)
+- [ ] **Shutdown critico batteria**: `M5.shutdown()` se `!isOnUsb() && batVoltage < 3.2V`
 
-### WiFi state machine e screen map (implementazione codice)
+### WiFi state machine e screen map
 
-> Design già documentato in `docs/wifi_state_machine.md`, `docs/ui_button_model.md`, `docs/screen_map.md`
+> Design documentato in `docs/wifi_state_machine.md`, `docs/ui_button_model.md`, `docs/screen_map.md`
 
 - [ ] Implementare FSM WiFi a 6 stati (`WIFI_ST_OFF` default al boot)
 - [ ] Screen map aggiornata: S0→S3 NAV diretto (WiFi OFF al boot)
-- [ ] Menu emergenza via EXT long press (ISR)
 - [ ] Pagina S1 PROFILI accessibile solo da menu pagina 3
 
-### Web server — accessibilità completa
+### Web server — configurazione via browser
 
-- [ ] Web server (OTA + config) attivo sia su **AP domestico** (STA mode, IP locale)
-  che su **AP interno** (SoftAP WiFiManager, 192.168.4.1)
 - [ ] Pagina `/config`: modifica callsign, locator, SSID, passcode, intervalli TX
-- [ ] Profili stazione editabili via web (risolve bug #2 NOCALL hardcoded)
+- [ ] Profili stazione editabili via web
+- [ ] Accessibile sia in STA mode (IP locale) che in SoftAP (192.168.4.1)
 
-### Bug dalla v1.2.6 da risolvere in v1.2.7
+### Bug da chiudere
 
-- [ ] **SmartBeacon aggressivo** (#3): filtro delta <50m da fermo; `SB_FAST_RATE` = 120s minimo
-- [ ] **MID breve non assegnato** (#4): tasto centrale breve → commutazione ENV↔GPS
-- [ ] **PARM/UNIT/EQNS ripetuti** (#5): inviare solo al boot (non ai primi 2 cicli)
-- [ ] **Weather senza ENV III** (#6): skip invio se sensore scollegato / dati non aggiornati
-- [ ] **Commento posizione ridondante** (#7): rimuovere o semplificare
-- [ ] **Schermo GPS ridondante** (#8): unificare sat count e fix in unica riga
-- [ ] **BDS non mostrato** (#9): aggiungere satelliti BeiDou al conteggio display
+| # | Problema | Priorità |
+|---|----------|----------|
+| B5 | PARM/UNIT/EQNS ripetuti a ogni reboot (`telemetryDefSent` non in NVS) | Media |
+| B6 | Skip invio weather se sensore ENV non aggiornato/scollegato | Media |
+| B7 | Commento posizione APRS ridondante | Bassa |
+| B9 | Satelliti BeiDou non conteggiati nel display | Bassa |
+| W2 | Doppio reboot durante handover AP (watchdog?) | Alta |
+| W3 | PARM/UNIT/EQNS duplicati su APRS-IS dopo ogni reboot | Media |
 
-### Mappa bit telemetria definitiva (v1.2.7)
+### Mappa bit telemetria (v1.3)
 
-| Bit | Maschera | PARM label | Semantica | Stato |
-|-----|----------|------------|-----------|-------|
+| Bit | Maschera | Label | Semantica | Stato |
+|-----|----------|-------|-----------|-------|
 | 7 | 0x80 | GPS | GPS fix valido (`isValid && isUpdated`) | ✅ |
 | 6 | 0x40 | WiFi | WiFi associato (`WL_CONNECTED`) | ✅ |
 | 5 | 0x20 | Chg | Batteria in carica (slope>0 && !isOnUsb) | ⏳ |

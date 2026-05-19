@@ -25,9 +25,10 @@ L'autore declina ogni responsabilità per un utilizzo non conforme alle normativ
 
 ## Versione
      
-| Versione | Data       | Note                                                   |
-|----------|------------|--------------------------------------------------------|
-| v1.2.7   | 2026-05-18 | Fix locator 8-char, display 10-char, APRS-IS operativo |
+| Versione   | Data       | Note                                                          |
+|------------|------------|---------------------------------------------------------------|
+| **v1.2.8** | 2026-05-20 | **Bug fixes post-campo, boot splash, WiFi ottimizzato**       |
+| v1.2.7     | 2026-05-18 | Fix locator 8-char, display 10-char, APRS-IS operativo        |
 | v1.2.6   | 2026-05-17 | Fix WiFiManager, display, intervalli TX configurabili  |
 | v1.2.5   | 2026-05-17 | Build LITE: partizione default.csv senza BLE/logger    |
 | v1.3     | 2026-05-17 | Moduli avanzati: buzzer, LED, data logger, astro       |
@@ -192,8 +193,10 @@ pio device monitor
 │   ├── screen_map.md           # Mappa schermate e transizioni
 │   └── HW/                     # Datasheet PDF, schemi elettrici
 └── builds/
-    ├── v1.3/                   # Firmware v1.3 + release notes
-    ├── v1.2/                   # Release notes (firmware sul dispositivo)
+    ├── v1.2.8/                 # Firmware v1.2.8 (coreink_lite) + release notes
+    ├── v1.2.7/                 # Firmware v1.2.7 (coreink_lite) + release notes
+    ├── v1.2.6/                 # Release notes
+    ├── v1.2.5/                 # Release notes
     ├── v1.1/                   # Firmware v1.1 + release notes
     ├── v1.0/                   # Release notes (firmware non disponibile)
     └── v0.1/                   # Release notes (prototipo)

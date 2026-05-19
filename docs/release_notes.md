@@ -2,6 +2,37 @@
 
 ---
 
+## v1.2.8 — Bug fixes post-campo + boot splash + WiFi ottimizzato (2026-05-20)
+
+Consolidamento basato sulla prima giornata operativa sul campo (EA5JDG-13, 19/05/2026).
+
+**Build**: `coreink_lite` — Flash 84.0% · RAM 16.1%
+
+### Fix
+
+| ID | Problema | Soluzione |
+|----|----------|-----------|
+| BUG-01 | Password APRS-IS visibile nel display NVS | Rimossa; la schermata mostra solo Loc e Sym |
+| BUG-02 | Doppio TX posizione: SmartBeacon + timer fallback `sbActive` | Rimosso timer fallback ridondante |
+| BUG-03 | "Location changes too fast" da stazione ferma (jitter GPS) | Filtro distanza indipendente dalla velocità; `SB_MIN_DIST_M` 50→100 m |
+| BUG-04 | Ora in basso a sinistra (poco visibile) | Spostata in alto a destra nell'header |
+| BUG-05 | Pressione mostrata in "hPa" | Cambiato in "mbar" (valore identico) |
+| BUG-07 | Nessun warning visivo batteria bassa | Aggiunto `LOW` (<3.5 V) e `!!!` (<3.3 V) in pagina 1 e 3 |
+| BUG-08 | Messaggio "Premi EXT per attivare GPS" ingannevole | Cambiato in "Vai a pag.7, premi MID per GPS" |
+| BUG-09 | Uptime in minuti ("347m"), mancava ora ultimo TX | Formato `Xh Ym` + ora ultimo TX in pagina 3 |
+| BUG-10 | Nessun hint interazione in pagina 7 (Meteo) | Aggiunti "MID: menu" e "EXT 3s: emergenza" |
+| BUG-11 | Refresh automatico immediato dopo cambio pagina | `lastDisplayTime = millis()` dopo UP/DOWN |
+| BUG-12 | WiFi bloccato sull'AP1 dopo disconnessione | Round-robin AP1→AP2→AP3 con backoff 2 s |
+
+### Nuove funzionalità
+
+- **Boot splash**: schermata di benvenuto centrata con versione e "Avvio in corso…" (~5 s di durata)
+- **WiFi ottimizzato**: `WiFi.begin()` senza argomenti al boot (usa last-known-good AP); timeout ridotto 15 s→8 s; avvio totale ~12 s (da ~24 s)
+- **Menu pagina 7**: MID apre menu contestuale con "1. Forza lettura" e "2. Commuta ENV/GPS"; timeout 10 s
+- **EXT long**: soglia portata da 2 s a 3 s (anti-accidentale); EXT short = nessuna azione
+
+---
+
 ## v1.2.7 — Fix locator Maidenhead (2026-05-18)
 
 Fix precisione posizione e display locator.
