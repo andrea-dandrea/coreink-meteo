@@ -61,6 +61,7 @@ Fix precisione locator, display 10-char Maidenhead. Prima versione APRS-IS verif
 | F | Bit Chg (0x20) | `sendTelemetry()`: slope>0 && !isOnUsb | ⏳ |
 | G | Bit Err (0x08) | `sendTelemetry()`: `pressure==0.0f` (QMP reset attivo) | ⏳ |
 | H | PARM label R1→LoRa | Sempre 0; dichiarato per compatibilità v2.0 | ⏳ |
+| R | **Shutdown critico** | `!isOnUsb() && Vbat < 3.2V` → `M5.shutdown()`; warning buzzer+LED a <3.5V (era <3.3V) | ⏳ |
 
 ### WiFi state machine e screen map (implementazione codice)
 
@@ -115,6 +116,20 @@ Fix precisione locator, display 10-char Maidenhead. Prima versione APRS-IS verif
 | 7 | Commento posizione ridondante | Rimuovere/semplificare | ⏳ |
 | 8 | Schermo GPS ridondante | Unificare sat count e fix | ⏳ |
 | 9 | BDS non mostrato | Aggiungere BeiDou al conteggio | ⏳ |
+
+---
+
+## Fix aggiuntivi — build finale (test hardware live)
+
+| # | Bug riscontrato | Fix | Stato |
+|---|-----------------|-----|-------|
+| F1 | TX:FAIL sempre mostrato in modalità GPS | `sendPositionPacket()`: cattura bool `txClient.sendPacket()`, aggiorna `lastTxOk` + `lastTxTime` + `led_flash_tx()` | ✅ |
+| F2 | Status APRS mostra "v1.2.6" da NVS stale | `setup()`: se valore NVS inizia con "CoreInk-Meteo v", forza `APRS_STATUS_DEFAULT` e risalva su NVS | ✅ |
+| F3 | MID long 3s → WiFiManager troppo sensibile | `pressedFor(3000)` → `pressedFor(5000)` | ✅ |
+| F4 | EXT non aveva azione su schermo 2/3 | EXT long (2s) → `showWifiMenu()` (emergenza WiFi da qualsiasi pagina); EXT short → toggle ENV/GPS (solo pagina 6) | ✅ |
+| F5 | WiFiManager bloccava device 5 minuti | Non-blocking (`setConfigPortalBlocking(false)` + `process()`), timeout 120s, EXT aborta, OTA disponibile durante AP | ✅ |
+| F6 | /config non disponibile su STA | Aggiunto endpoint `/config` GET+POST con form HTML completo (callsign, SSID, passcode, locator, simbolo, status, vol, melodia, intervalli) | ✅ |
+| F7 | NTP non risincronizzato dopo riconnessione WiFi | `wifi_update()` CONNECTING→CONNECTED: aggiunta chiamata `syncTime()` | ✅ |
 
 ---
 

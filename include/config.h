@@ -3,7 +3,7 @@
 
 // === Versione firmware ===
 #ifndef FW_VERSION
-#define FW_VERSION "1.3"
+#define FW_VERSION "1.2.7"
 #endif
 
 // === Reti WiFi memorizzate (si connette alla prima disponibile) ===
@@ -80,12 +80,13 @@ const StationProfile profiles[NUM_PROFILES] = {
 // Algoritmo che adatta l'intervallo di beacon alla velocità e ai cambi di rotta.
 #define SMARTBEACON_ENABLED 1     // 1 = abilitato, 0 = intervallo fisso
 #define SB_FAST_SPEED 100         // Velocità alta (km/h) -> intervallo minimo
-#define SB_FAST_RATE 60           // Intervallo minimo (secondi) ad alta velocità
+#define SB_FAST_RATE 120          // Intervallo minimo (secondi) ad alta velocità
 #define SB_SLOW_SPEED 5           // Velocità bassa (km/h) -> intervallo massimo
 #define SB_SLOW_RATE 1800         // Intervallo massimo (secondi) a bassa velocità
 #define SB_TURN_MIN_ANGLE 30      // Angolo minimo (gradi) per trigger svolta
 #define SB_TURN_SLOPE 240         // Slope: angolo/velocità per trigger
 #define SB_TURN_TIME 15           // Tempo minimo (sec) tra beacon per svolta
+#define SB_MIN_DIST_M 50          // Distanza minima (m) tra beacon (filtro fermo)
 
 // === OTA (Over-The-Air update) ===
 // Abilita aggiornamento firmware via WiFi (ArduinoOTA + Web upload).
@@ -111,6 +112,9 @@ const StationProfile profiles[NUM_PROFILES] = {
 
 // === Batteria ===
 #define BAT_ADC_PIN 35            // Pin ADC per lettura tensione batteria
+#define BAT_USB_THRESHOLD_V 4.4f  // Vbat > soglia => USB collegata (backdrive SY7088)
+#define BAT_LOW_THRESHOLD_V 3.5f  // Vbat < soglia => batteria bassa: LED_FAST + buzzer
+#define BAT_CRITICAL_THRESHOLD_V 3.2f // Vbat < soglia => batteria critica: shutdown
 // Il CoreInk usa un partitore 25.1/5.1 — la conversione è gestita nel codice
 // con esp_adc_cal per maggiore precisione.
 
@@ -120,9 +124,9 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define WIFIMANAGER_TIMEOUT 600   // Timeout portale captive (secondi) — 10 minuti
 
 // === Telemetria APRS ===
-// Intervallo di invio pacchetti PARM/UNIT/EQNS (definizione canali)
-#define TELEMETRY_DEFINITION_INTERVAL_MS 7200000  // Ogni 2 ore
+// PARM/UNIT/EQNS inviati UNA SOLA VOLTA al boot (non a intervallo).
 // Canali: 1=Vbat(mV), 2=RSSI(dBm+100), 3=Uptime(min), 4=SatGPS, 5=libero
+#define TELEMETRY_DEFINITION_INTERVAL_MS 7200000  // Intervallo backup (ogni 2 ore)
 
 // === Temporizzazione ===
 #define WEATHER_INTERVAL_MS 300000   // Meteo ogni 5 minuti (default)

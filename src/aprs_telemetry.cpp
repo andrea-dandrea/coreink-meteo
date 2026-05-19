@@ -49,7 +49,7 @@ String aprs_build_telemetry_parm(const char* callsign, int ssid) {
     snprintf(dest, sizeof(dest), "%-9s", full_call);
 
     char payload[128];
-    snprintf(payload, sizeof(payload), ":%s:PARM.Vbat,RSSI,Uptime,Sat,Rsvd,GPS,WiFi,Chg,TX,Err,R1,R2,R3",
+    snprintf(payload, sizeof(payload), ":%s:PARM.Vbat,RSSI,Uptime,Sat,Rsvd,GPS,WiFi,Chg,TX,Err,LoRa,R2,R3",
              dest);
 
     return String(header) + String(payload);

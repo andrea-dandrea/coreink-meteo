@@ -10,8 +10,13 @@
 
 // Chiavi NVS
 #define NVS_NAMESPACE "meteo_cfg"
-#define NVS_KEY_WIFI_SSID "wifi_ssid"
-#define NVS_KEY_WIFI_PASS "wifi_pass"
+#define NVS_KEY_WIFI_SSID  "wifi_ssid"   // AP1 (salvato da WiFiManager)
+#define NVS_KEY_WIFI_PASS  "wifi_pass"
+#define NVS_KEY_WIFI2_SSID "wifi2_ssid"  // AP2
+#define NVS_KEY_WIFI2_PASS "wifi2_pass"
+#define NVS_KEY_WIFI3_SSID "wifi3_ssid"  // AP3
+#define NVS_KEY_WIFI3_PASS "wifi3_pass"
+// Per-profilo: chiavi generate runtime come "call_0" / "pass_0" / "ssid_0" / "sym_0" / "lbl_0"
 #define NVS_KEY_CALLSIGN "callsign"
 #define NVS_KEY_PASSCODE "passcode"
 #define NVS_KEY_SSID_APRS "ssid_aprs"

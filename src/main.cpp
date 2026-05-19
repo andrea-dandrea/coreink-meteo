@@ -143,6 +143,32 @@ int telemetrySeq = 0;
 bool lastTxOk = false;
 char lastTxTime[6] = "--:--";
 
+// === Telemetria: definizioni inviate solo al boot (non a intervallo) ===
+bool telemetryDefSent = false;
+
+// === Charge detection ===
+enum ChargeState { CHG_UNKNOWN, CHG_CHARGING, CHG_DISCHARGING, CHG_IDLE };
+ChargeState chargeState = CHG_UNKNOWN;
+
+// === WiFi FSM ===
+enum WifiState {
+    WIFI_ST_OFF,
+    WIFI_ST_CONNECTING,
+    WIFI_ST_CONNECTED,
+    WIFI_ST_DISCONNECTED,
+    WIFI_ST_WAITING,
+    WIFI_ST_AP_CONFIG
+};
+WifiState wifiState   = WIFI_ST_OFF;
+WifiState wifiStatePrev = WIFI_ST_OFF;
+unsigned long wifiRetryTime    = 0;
+int           wifiRetryBackoff = 15000;
+
+// === SmartBeacon: posizione dell'ultimo beacon (filtro delta) ===
+float sbLastTxLat  = 0.0f;
+float sbLastTxLon  = 0.0f;
+bool  sbLastTxValid = false;
+
 // === Display multi-pagina ===
 int currentPage = 0;
 bool coordShowMaidenhead = false;
@@ -181,6 +207,11 @@ void switchPortMode(int newMode);
 void drawPortModeNotice();
 void writeLogRecord();
 String latlon_to_maidenhead(float lat, float lon);
+bool isOnUsb();
+ChargeState detectChargeState();
+void wifi_update();
+void showWifiMenu();
+float haversineM(float lat1, float lon1, float lat2, float lon2);
 #if OTA_ENABLED
 void setupOTA();
 #endif
@@ -244,15 +275,26 @@ void setup() {
     // Caricare TUTTI i parametri da NVS
     {
         String s;
-        s = nvs_load_string(NVS_KEY_CALLSIGN, profiles[activeProfile].callsign);
+        char pkey[16];
+
+        // Callsign per-profilo: "call_N" — fallback legacy "callsign"
+        snprintf(pkey, sizeof(pkey), "call_%d", activeProfile);
+        s = nvs_load_string(pkey, "");
+        if (s.length() == 0) s = nvs_load_string(NVS_KEY_CALLSIGN, profiles[activeProfile].callsign);
         strncpy(rtCallsign, s.c_str(), sizeof(rtCallsign) - 1);
         rtCallsign[sizeof(rtCallsign) - 1] = '\0';
 
-        s = nvs_load_string(NVS_KEY_PASSCODE, profiles[activeProfile].passcode);
+        // Passcode per-profilo: "pass_N" — fallback legacy "passcode"
+        snprintf(pkey, sizeof(pkey), "pass_%d", activeProfile);
+        s = nvs_load_string(pkey, "");
+        if (s.length() == 0) s = nvs_load_string(NVS_KEY_PASSCODE, profiles[activeProfile].passcode);
         strncpy(rtPasscode, s.c_str(), sizeof(rtPasscode) - 1);
         rtPasscode[sizeof(rtPasscode) - 1] = '\0';
 
-        rtSsidAprs = nvs_load_int(NVS_KEY_SSID_APRS, profiles[activeProfile].ssid);
+        // SSID APRS per-profilo: "ssid_N" — fallback legacy "ssid_aprs"
+        snprintf(pkey, sizeof(pkey), "ssid_%d", activeProfile);
+        int ssidLegacy = nvs_load_int(NVS_KEY_SSID_APRS, profiles[activeProfile].ssid);
+        rtSsidAprs = nvs_load_int(pkey, ssidLegacy);
 
         s = nvs_load_string(NVS_KEY_LOCATOR, STATION_LOCATOR);
         strncpy(rtLocator, s.c_str(), sizeof(rtLocator) - 1);
@@ -268,8 +310,12 @@ void setup() {
             rtSymbolCode = profiles[activeProfile].symbolCode;
         }
 
-        // APRS Status
+        // APRS Status — se il valore NVS e' il formato default (con versione), aggiorna sempre alla versione corrente
         s = nvs_load_string(NVS_KEY_APRS_STATUS, APRS_STATUS_DEFAULT);
+        if (s.startsWith("CoreInk-Meteo v")) {
+            s = APRS_STATUS_DEFAULT;
+            nvs_save_string(NVS_KEY_APRS_STATUS, s.c_str());
+        }
         strncpy(rtAprsStatus, s.c_str(), sizeof(rtAprsStatus) - 1);
         rtAprsStatus[sizeof(rtAprsStatus) - 1] = '\0';
 
@@ -300,9 +346,10 @@ void setup() {
 
         connectWiFi();
         if (WiFi.status() != WL_CONNECTED) {
-            startWiFiManager();
+            showWifiMenu();  // S2: menu WiFi con timeout, senza AP automatico
         }
         if (WiFi.status() == WL_CONNECTED) {
+            wifiState = WIFI_ST_CONNECTED;
             if (strcmp(rtCallsign, "NOCALL") != 0 && strcmp(rtPasscode, "-1") != 0) {
                 led_set_state(LED_SOLID);
             } else {
@@ -312,6 +359,7 @@ void setup() {
         }
     } else {
         WiFi.mode(WIFI_OFF);
+        wifiState = WIFI_ST_OFF;
         Serial.println("[WiFi] Disabilitato (NVS)");
     }
 
@@ -374,6 +422,10 @@ void setup() {
         }
         sendWeatherPacket();
         sendPositionPacket();  // Posizione iniziale (una tantum se fissa)
+        smartBeacon.reset();   // Evita doppio TX: SmartBeacon non rifara' beacon subito nel loop
+        // Definizioni telemetria: inviate UNA SOLA VOLTA al boot
+        sendTelemetryDefinitions();
+        telemetryDefSent = true;
     } else {
         Serial.println("[APRS] TX saltato: configura callsign/passcode via WiFiManager (MID 3s)");
     }
@@ -439,13 +491,17 @@ void loop() {
     // Telemetria ogni TELEMETRY_INTERVAL_MS (default 10 min)
     if (now - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
         batVoltage = readBattery();
+        chargeState = detectChargeState();
         if (canTx) sendTelemetry();
         lastTelemetryTime = now;
     }
 
-    // Definizioni telemetria
-    if (now - lastTelemetryDefTime >= TELEMETRY_DEFINITION_INTERVAL_MS) {
-        if (canTx) sendTelemetryDefinitions();
+    // Definizioni telemetria: al boot (già inviate) + backup ogni 2 ore
+    if (!telemetryDefSent || (now - lastTelemetryDefTime >= TELEMETRY_DEFINITION_INTERVAL_MS)) {
+        if (canTx) {
+            sendTelemetryDefinitions();
+            telemetryDefSent = true;
+        }
         lastTelemetryDefTime = now;
     }
 
@@ -475,8 +531,20 @@ void loop() {
     // === Pulsanti ===
     M5.update();
 #if defined(BOARD_COREINK)
-    if (M5.BtnMID.pressedFor(3000)) {
-        startWiFiManager();
+    // MID: long (3s) → WiFiManager | short → azione contestuale per pagina
+    {
+        static bool midLongFired = false;
+        if (!midLongFired && M5.BtnMID.pressedFor(5000)) {
+            midLongFired = true;
+            startWiFiManager();
+        }
+        if (M5.BtnMID.wasReleased()) {
+            if (!midLongFired) {
+                // MID short: azione contestuale per pagina (nessuna azione globale)
+                // future versioni: azione per pagina attiva
+            }
+            midLongFired = false;
+        }
     }
     if (M5.BtnUP.wasPressed()) {
         currentPage = (currentPage - 1 + NUM_PAGES) % NUM_PAGES;
@@ -488,14 +556,28 @@ void loop() {
         buzzer_play_event(BUZZ_PAGE);
         updateDisplay();
     }
-    if (M5.BtnEXT.wasPressed()) {
-        int newMode = (portMode == PORT_MODE_ENV) ? PORT_MODE_GPS : PORT_MODE_ENV;
-        switchPortMode(newMode);
-        nvs_save_int(NVS_KEY_PORT_MODE, portMode);
-        buzzer_play_event(BUZZ_CONFIRM);
-        drawPortModeNotice();
-        delay(2000);
-        updateDisplay();
+    // EXT: long (2s) → WiFi emergenza (showWifiMenu) | short → cambia porta (solo pagina 6)
+    {
+        static bool extLongFired = false;
+        if (!extLongFired && M5.BtnEXT.pressedFor(2000)) {
+            extLongFired = true;
+            showWifiMenu();
+            M5.update();  // Aggiorna stato tasto dopo blocco
+            if (!M5.BtnEXT.isPressed()) extLongFired = false;  // Gia' rilasciato dentro showWifiMenu
+            updateDisplay();
+        }
+        if (M5.BtnEXT.wasReleased()) {
+            if (!extLongFired && currentPage == 6) {
+                int newMode = (portMode == PORT_MODE_ENV) ? PORT_MODE_GPS : PORT_MODE_ENV;
+                switchPortMode(newMode);
+                nvs_save_int(NVS_KEY_PORT_MODE, portMode);
+                buzzer_play_event(BUZZ_CONFIRM);
+                drawPortModeNotice();
+                delay(2000);
+            }
+            extLongFired = false;
+            updateDisplay();
+        }
     }
 #elif defined(BOARD_STICKCPLUS2)
     if (M5.BtnA.pressedFor(3000)) startWiFiManager();
@@ -520,39 +602,175 @@ void loop() {
     ble_ota_handle();
 #endif
 
-    // Batteria bassa
-    if (batVoltage > 0.5f && batVoltage < 3.3f) {
-        led_set_state(LED_FAST);
-        static unsigned long lastBatWarn = 0;
-        if (now - lastBatWarn > 60000) {
-            buzzer_play_event(BUZZ_BAT_LOW);
-            lastBatWarn = now;
+    // WiFi FSM
+    wifi_update();
+
+    // Batteria bassa / critica (non su USB)
+    if (!isOnUsb() && batVoltage > 0.5f) {
+        if (batVoltage < BAT_CRITICAL_THRESHOLD_V) {
+            // Batteria critica: spegni il dispositivo (BM8563 de-asserta PS_EN)
+            // TODO v1.3: mostrare schermata "Batteria critica" prima dello spegnimento
+            M5.shutdown();
+        } else if (batVoltage < BAT_LOW_THRESHOLD_V) {
+            led_set_state(LED_FAST);
+            static unsigned long lastBatWarn = 0;
+            if (now - lastBatWarn > 60000) {
+                buzzer_play_event(BUZZ_BAT_LOW);
+                lastBatWarn = now;
+            }
         }
     }
 
-    // WiFi reconnect
-    if (wifiEnabled && WiFi.status() != WL_CONNECTED) {
-        led_set_state(LED_SLOW);
-        static unsigned long lastReconnect = 0;
-        if (now - lastReconnect > 60000) {
-            connectWiFi();
-            if (WiFi.status() == WL_CONNECTED) {
-                if (strcmp(rtCallsign, "NOCALL") != 0 && strcmp(rtPasscode, "-1") != 0) {
-                    led_set_state(LED_SOLID);
-                } else {
-                    led_set_state(LED_SLOW);
-                }
-                buzzer_play_event(BUZZ_WIFI_OK);
-            }
-            lastReconnect = now;
-        }
-    }
+    // WiFi reconnect gestito da wifi_update() — rimosso loop primitivo
 
     delay(50);
 }
 
 // ============================================================================
-// WIFI
+// BATTERIA: isOnUsb() e detectChargeState()
+// ============================================================================
+bool isOnUsb() {
+    // Backdrive del body-diode del FET sincrono SY7088: quando USB è collegata,
+    // la tensione sul partitore ADC supera la soglia della LiPo carica (4.2V).
+    // Vedi docs/power_analysis.md per la derivazione della soglia 4.4V.
+    return batVoltage > BAT_USB_THRESHOLD_V;
+}
+
+ChargeState detectChargeState() {
+    if (isOnUsb()) return CHG_UNKNOWN;  // USB collegata: backdrive alza Vbat, slope non affidabile
+    if (!batSamplesReady) return CHG_UNKNOWN;  // Non abbastanza campioni
+    // Slope = campione più recente - campione più vecchio nel buffer circolare
+    int oldestIdx = batSampleIdx;  // prossima scrittura = campione più vecchio
+    int newestIdx = (batSampleIdx + BAT_ADC_SAMPLES - 1) % BAT_ADC_SAMPLES;
+    float slope = batSamples[newestIdx] - batSamples[oldestIdx];
+    if (slope >  0.02f) return CHG_CHARGING;
+    if (slope < -0.02f) return CHG_DISCHARGING;
+    return CHG_IDLE;
+}
+
+// ============================================================================
+// WIFI FSM
+// ============================================================================
+void wifi_update() {
+    if (!wifiEnabled) return;
+    unsigned long now = millis();
+    switch (wifiState) {
+        case WIFI_ST_OFF:
+            break;
+        case WIFI_ST_CONNECTING:
+            if (WiFi.status() == WL_CONNECTED) {
+                wifiState = WIFI_ST_CONNECTED;
+                wifiRetryBackoff = 15000;
+                if (strcmp(rtCallsign, "NOCALL") != 0 && strcmp(rtPasscode, "-1") != 0)
+                    led_set_state(LED_SOLID);
+                else
+                    led_set_state(LED_SLOW);
+                buzzer_play_event(BUZZ_WIFI_OK);
+                syncTime();  // Risincronizza NTP dopo riconnessione
+                // Definizioni telemetria dopo riconnessione (se non già inviate)
+                telemetryDefSent = false;
+            } else if (now - wifiRetryTime > WIFI_TIMEOUT_MS) {
+                WiFi.disconnect();
+                wifiState = (wifiStatePrev == WIFI_ST_CONNECTED ||
+                             wifiStatePrev == WIFI_ST_DISCONNECTED)
+                            ? WIFI_ST_DISCONNECTED : WIFI_ST_WAITING;
+                wifiRetryTime = now;
+                led_set_state(LED_SLOW);
+            }
+            break;
+        case WIFI_ST_CONNECTED:
+            if (WiFi.status() != WL_CONNECTED) {
+                wifiState = WIFI_ST_DISCONNECTED;
+                wifiStatePrev = WIFI_ST_CONNECTED;
+                wifiRetryTime = now;
+                wifiRetryBackoff = 15000;
+                led_set_state(LED_SLOW);
+            }
+            break;
+        case WIFI_ST_DISCONNECTED:
+            if (now - wifiRetryTime >= (unsigned long)wifiRetryBackoff) {
+                wifiStatePrev = WIFI_ST_DISCONNECTED;
+                wifiState = WIFI_ST_CONNECTING;
+                wifiRetryTime = now;
+                WiFi.begin();
+                if (wifiRetryBackoff < 60000) wifiRetryBackoff *= 2;
+                if (wifiRetryBackoff > 60000) wifiRetryBackoff = 60000;
+            }
+            break;
+        case WIFI_ST_WAITING:
+            // Nessun retry automatico: l'utente deve agire dal menu
+            break;
+        case WIFI_ST_AP_CONFIG:
+            // Gestito da startWiFiManager() (blocking)
+            break;
+    }
+}
+
+// ============================================================================
+// S2 WIFI MENU (boot screen)
+// ============================================================================
+void showWifiMenu() {
+    // Mostra schermata per WIFI_MENU_TIMEOUT_S secondi.
+    // MID = prova connessione | EXT = salta
+    unsigned long deadline = millis() + (unsigned long)WIFI_MENU_TIMEOUT_S * 1000UL;
+    int remaining = WIFI_MENU_TIMEOUT_S;
+    bool userChose = false;
+    bool skip = false;
+
+    while (millis() < deadline && !userChose) {
+        remaining = (int)((deadline - millis()) / 1000);
+#if defined(BOARD_COREINK)
+        M5.M5Ink.clear();
+        mainSprite.clear();
+        char buf[48];
+        mainSprite.drawString(5, 5,  "[S2] WiFi MENU",      &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 30, "MID = connetti",       &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 50, "EXT = salta",          &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 80, "AUTO-connect dopo:",   &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "%ds", remaining);
+        mainSprite.drawString(5, 100, buf,                   &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 130, WiFi.SSID().length() ? WiFi.SSID().c_str() : "(nessuna rete salvata)",
+                              &fonts::AsciiFont8x16);
+        mainSprite.pushSprite();
+#endif
+        unsigned long frameEnd = millis() + 1000;
+        while (millis() < frameEnd) {
+            M5.update();
+            if (M5.BtnMID.wasPressed()) { userChose = true; skip = false; break; }
+            if (M5.BtnEXT.wasPressed()) { userChose = true; skip = true;  break; }
+            delay(50);
+        }
+    }
+
+    if (!skip) {
+        // Tenta connessione con credenziali salvate
+        connectWiFi();
+        if (WiFi.status() == WL_CONNECTED) {
+            wifiState = WIFI_ST_CONNECTED;
+        } else {
+            wifiState = WIFI_ST_WAITING;
+        }
+    } else {
+        wifiState = WIFI_ST_WAITING;
+        Serial.println("[S2] WiFi saltato dall'utente");
+    }
+}
+
+// ============================================================================
+// Haversine: distanza in metri tra due coordinate GPS
+// ============================================================================
+float haversineM(float lat1, float lon1, float lat2, float lon2) {
+    const float R = 6371000.0f;  // Raggio Terra in metri
+    float dLat = radians(lat2 - lat1);
+    float dLon = radians(lon2 - lon1);
+    float a = sinf(dLat/2)*sinf(dLat/2)
+            + cosf(radians(lat1))*cosf(radians(lat2))
+            * sinf(dLon/2)*sinf(dLon/2);
+    return R * 2.0f * atan2f(sqrtf(a), sqrtf(1.0f-a));
+}
+
+// ============================================================================
+// WIFI: connessione alle reti in config.h
 // ============================================================================
 void connectWiFi() {
     Serial.println("[WiFi] Connessione...");
@@ -568,23 +786,27 @@ void connectWiFi() {
         return;
     }
 
-    Serial.println("\n[WiFi] Provo reti config.h...");
+    // Prova le 3 reti WiFi salvate in NVS (AP1=wifi_ssid legacy, AP2/AP3=wifi2/3_ssid)
+    static const char* ssid_keys[] = { NVS_KEY_WIFI_SSID, NVS_KEY_WIFI2_SSID, NVS_KEY_WIFI3_SSID };
+    static const char* pass_keys[] = { NVS_KEY_WIFI_PASS, NVS_KEY_WIFI2_PASS, NVS_KEY_WIFI3_PASS };
+    Serial.println("\n[WiFi] Provo 3 reti NVS...");
     WiFi.disconnect();
-    for (int i = 0; i < NUM_WIFI_APS; i++) {
-        if (strlen(wifiNetworks[i].ssid) > 1 && strcmp(wifiNetworks[i].ssid, "RETE_1") != 0) {
-            WiFi.begin(wifiNetworks[i].ssid, wifiNetworks[i].password);
-            start = millis();
-            while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS / NUM_WIFI_APS) {
-                delay(500);
-                Serial.print(".");
-            }
-            if (WiFi.status() == WL_CONNECTED) {
-                Serial.printf("\n[WiFi] Connesso: %s IP: %s\n",
-                              WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
-                return;
-            }
-            WiFi.disconnect();
+    for (int i = 0; i < 3; i++) {
+        String ss = nvs_load_string(ssid_keys[i], "");
+        if (ss.length() == 0) continue;
+        String pp = nvs_load_string(pass_keys[i], "");
+        WiFi.begin(ss.c_str(), pp.c_str());
+        start = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS / 3) {
+            delay(500);
+            Serial.print(".");
         }
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("\n[WiFi] Connesso AP%d: %s IP: %s\n", i + 1,
+                          WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+            return;
+        }
+        WiFi.disconnect();
     }
     Serial.println("\n[WiFi] FALLITO!");
 }
@@ -606,6 +828,7 @@ void startWiFiManager() {
     mainSprite.drawString(5, 100, "192.168.4.1", &fonts::AsciiFont8x16);
     mainSprite.drawString(5, 130, "Configura APRS:", &fonts::AsciiFont8x16);
     mainSprite.drawString(5, 150, "call/pass/loc/sym", &fonts::AsciiFont8x16);
+    mainSprite.drawString(5, 175, "EXT: annulla", &fonts::AsciiFont8x16);
     mainSprite.pushSprite();
 #elif defined(BOARD_STICKCPLUS2)
     auto &lcd = StickCP2.Display;
@@ -618,9 +841,10 @@ void startWiFiManager() {
 #endif
 
     WiFiManager wm;
-    wm.setConfigPortalTimeout(300);  // 5 minuti — sicuro contro watchdog
+    wm.setConfigPortalTimeout(120);  // 2 minuti max
     wm.setConnectTimeout(10);        // Max 10s per tentativo di connessione
     wm.setBreakAfterConfig(true);    // Chiudi solo dopo salvataggio
+    wm.setConfigPortalBlocking(false); // Non-blocking: EXT aborta il portale
 
     // ---- Parametri APRS ----
     WiFiManagerParameter hdr1("<hr><h3>Stazione APRS</h3>");
@@ -692,7 +916,27 @@ void startWiFiManager() {
     WiFiManagerParameter p_st("st_intv", "Status ogni N minuti (10-180)", stBuf, 4);
     wm.addParameter(&p_st);
 
-    bool wifiOk = wm.startConfigPortal(WIFIMANAGER_AP_NAME);
+    wm.startConfigPortal(WIFIMANAGER_AP_NAME);
+    // Loop non-bloccante: EXT aborta, timeout via setConfigPortalTimeout
+    // otaServer rimane attivo anche durante l'AP (porta 8080 != 80)
+    while (true) {
+        if (wm.process()) break;  // Configurazione salvata o timeout
+        M5.update();
+        if (M5.BtnEXT.wasPressed()) {
+            wm.stopConfigPortal();
+            break;
+        }
+#if OTA_ENABLED
+        otaServer.handleClient();  // OTA raggiungibile su 192.168.4.1:8080
+#endif
+        delay(50);
+    }
+    bool wifiOk = (WiFi.status() == WL_CONNECTED);
+    if (!wifiOk) {
+        WiFi.mode(WIFI_STA);
+        wifiState = WIFI_ST_DISCONNECTED;  // Attiva reconnect automatico via wifi_update()
+        wifiRetryTime = millis();
+    }
 
     // Salvare parametri SEMPRE (anche se WiFi non si connette)
     if (strlen(p_call.getValue()) > 0) {
@@ -1028,7 +1272,7 @@ void drawPage(int page) {
 #if GPS_EXTRA_ENABLED
             snprintf(buf, sizeof(buf), "Sat:%d HDOP:%.1f", gpsSatellites, gpsExtra.getHdop());
 #else
-            snprintf(buf, sizeof(buf), "Sat:%d", gpsSatellites);
+            snprintf(buf, sizeof(buf), "Sat:%d HDOP:%.1f", gpsSatellites, gps.hdop.value() / 100.0f);
 #endif
             mainSprite.drawString(5, 136, buf, &fonts::AsciiFont8x16);
         }
@@ -1056,7 +1300,13 @@ void drawPage(int page) {
 #if GPS_EXTRA_ENABLED
         snprintf(buf, sizeof(buf), "Fix: %s  Q:%d", gpsFixValid ? "SI" : "NO", gpsExtra.getFixQuality());
         mainSprite.drawString(5, 40, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Vista:%d  Uso:%d", gpsExtra.getSatsInView(), gpsExtra.getSatsTracked());
+        {
+            int bdsSats = 0;
+            const SatInfo* si = gpsExtra.getSatInfo();
+            int sc = gpsExtra.getSatCount();
+            for (int j = 0; j < sc; j++) if (si[j].constellation == SAT_BEIDOU) bdsSats++;
+            snprintf(buf, sizeof(buf), "V:%d U:%d BDS:%d", gpsExtra.getSatsInView(), gpsExtra.getSatsTracked(), bdsSats);
+        }
         mainSprite.drawString(5, 58, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "HDOP:%.1f PDOP:%.1f", gpsExtra.getHdop(), gpsExtra.getPdop());
         mainSprite.drawString(5, 76, buf, &fonts::AsciiFont8x16);
@@ -1065,7 +1315,7 @@ void drawPage(int page) {
 #else
         snprintf(buf, sizeof(buf), "Fix: %s  Sat:%d", gpsFixValid ? "SI" : "NO", gpsSatellites);
         mainSprite.drawString(5, 40, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Alt: %.0f m", gpsAlt);
+        snprintf(buf, sizeof(buf), "Alt:%.0fm  HDOP:%.1f", gpsAlt, gps.hdop.value() / 100.0f);
         mainSprite.drawString(5, 58, buf, &fonts::AsciiFont8x16);
 #endif
         snprintf(buf, sizeof(buf), "Vel: %.1f km/h", gpsSpeed);
@@ -1106,11 +1356,17 @@ void drawPage(int page) {
         }
         if (n == 0) mainSprite.drawString(5, 60, "Nessun satellite", &fonts::AsciiFont8x16);
 #else
-        mainSprite.drawString(5, 20, "=== GPS ===", &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Sat: %d  Fix: %s", gpsSatellites, gpsFixValid ? "SI" : "NO");
-        mainSprite.drawString(5, 50, buf, &fonts::AsciiFont8x16);
-        mainSprite.drawString(5, 80, "(Dettaglio SAT non", &fonts::AsciiFont8x16);
-        mainSprite.drawString(5, 100, " disponibile)", &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 20, "=== Stato ===", &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "Vbat: %.2f V", batVoltage);
+        mainSprite.drawString(5, 42, buf, &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "Uptime: %lum", (millis() - uptimeStart) / 60000UL);
+        mainSprite.drawString(5, 62, buf, &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "WiFi: %s", WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "no conn");
+        mainSprite.drawString(5, 82, buf, &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "IP: %s", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "---");
+        mainSprite.drawString(5, 100, buf, &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "RSSI: %d dBm", WiFi.RSSI());
+        mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
 #endif
         break;
     }
@@ -1118,9 +1374,17 @@ void drawPage(int page) {
     case 3: { // === Profili + parametri NVS ===
         mainSprite.drawString(5, 20, "=== Profili ===", &fonts::AsciiFont8x16);
         for (int i = 0; i < NUM_PROFILES; i++) {
+            char ck[16], sk[16], lk[16];
+            snprintf(ck, sizeof(ck), "call_%d", i);
+            snprintf(sk, sizeof(sk), "ssid_%d", i);
+            snprintf(lk, sizeof(lk), "lbl_%d",  i);
+            String call = nvs_load_string(ck, "");
+            if (call.length() == 0) call = nvs_load_string(NVS_KEY_CALLSIGN, profiles[i].callsign);
+            int ssid = nvs_load_int(sk, nvs_load_int(NVS_KEY_SSID_APRS, profiles[i].ssid));
+            String lbl = nvs_load_string(lk, profiles[i].label);
             snprintf(buf, sizeof(buf), "%s %s-%d %s",
                      i == activeProfile ? ">" : " ",
-                     profiles[i].callsign, profiles[i].ssid, profiles[i].label);
+                     call.c_str(), ssid, lbl.c_str());
             mainSprite.drawString(5, 40 + i * 18, buf, &fonts::AsciiFont8x16);
         }
         mainSprite.drawString(5, 100, "--- NVS attivi ---", &fonts::AsciiFont8x16);
@@ -1150,7 +1414,11 @@ void drawPage(int page) {
 #if OTA_ENABLED
             snprintf(buf, sizeof(buf), "OTA: :%d/update", OTA_WEB_PORT);
             mainSprite.drawString(5, 130, buf, &fonts::AsciiFont8x16);
+#if DATA_LOGGER_ENABLED
             snprintf(buf, sizeof(buf), "CSV: :%d/data", OTA_WEB_PORT);
+#else
+            snprintf(buf, sizeof(buf), "CFG: :%d/config", OTA_WEB_PORT);
+#endif
             mainSprite.drawString(5, 148, buf, &fonts::AsciiFont8x16);
 #endif
         } else if (wifiEnabled) {
@@ -1316,6 +1584,12 @@ void drawPage(int page) {
 // APRS: Pacchetto meteo
 // ============================================================================
 void sendWeatherPacket() {
+    // Skip se ENV selezionato ma sensore scollegato o non inizializzato
+    if (portMode == PORT_MODE_GPS) return;  // Dati ENV non validi in modalita GPS
+    if (portMode == PORT_MODE_ENV && pressure == 0.0f && temperature == 0.0f) {
+        Serial.println("[APRS-WX] Skip: ENV scollegato o non inizializzato");
+        return;
+    }
     if (WiFi.status() != WL_CONNECTED) {
         connectWiFi();
         if (WiFi.status() != WL_CONNECTED) { lastTxOk = false; return; }
@@ -1359,15 +1633,24 @@ void sendWeatherPacket() {
 void sendPositionPacket() {
     if (WiFi.status() != WL_CONNECTED) {
         connectWiFi();
-        if (WiFi.status() != WL_CONNECTED) return;
+        if (WiFi.status() != WL_CONNECTED) { lastTxOk = false; return; }
     }
     const StationProfile& prof = profiles[activeProfile];
-    char comment[48];
-    snprintf(comment, sizeof(comment), "Vbat=%.2fV %s", batVoltage, FW_VERSION);
+    char comment[24];
+    snprintf(comment, sizeof(comment), "Vbat=%.2fV", batVoltage);
     String packet;
     if (portMode == PORT_MODE_GPS && gpsFixValid) {
         packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
-            gpsLat, gpsLon, rtSymbolTable, rtSymbolCode, comment);
+            gpsLat, gpsLon, rtSymbolTable, rtSymbolCode,
+            comment);
+        // SmartBeacon: filtro distanza minima da fermo
+        if (sbLastTxValid) {
+            float dist = haversineM(sbLastTxLat, sbLastTxLon, gpsLat, gpsLon);
+            if (gpsSpeed < SB_SLOW_SPEED && dist < SB_MIN_DIST_M) {
+                Serial.printf("[APRS-POS] Skip SmartBeacon: fermo, dist=%.0fm\n", dist);
+                return;
+            }
+        }
     } else {
         packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
             rtLocator, rtSymbolTable, rtSymbolCode, comment);
@@ -1375,9 +1658,25 @@ void sendPositionPacket() {
     Serial.printf("[APRS-POS] %s\n", packet.c_str());
     AprsIs txClient(APRS_SERVER, APRS_PORT, rtCallsign, rtSsidAprs, rtPasscode);
     if (txClient.connect()) {
-        txClient.sendPacket(packet);
+        if (txClient.sendPacket(packet)) {
+            lastTxOk = true;
+            led_flash_tx();
+        } else {
+            lastTxOk = false;
+        }
+        // Aggiorna ultima posizione TX per filtro delta SmartBeacon
+        if (portMode == PORT_MODE_GPS && gpsFixValid) {
+            sbLastTxLat = gpsLat;
+            sbLastTxLon = gpsLon;
+            sbLastTxValid = true;
+        }
         txClient.disconnect();
+    } else {
+        lastTxOk = false;
     }
+    struct tm ti;
+    if (getLocalTime(&ti))
+        snprintf(lastTxTime, sizeof(lastTxTime), "%02d:%02d", ti.tm_hour, ti.tm_min);
 }
 
 // ============================================================================
@@ -1391,9 +1690,14 @@ void sendTelemetry() {
     const StationProfile& prof = profiles[activeProfile];
     int sats = (portMode == PORT_MODE_GPS) ? gpsSatellites : 0;
     uint8_t bits = 0;
-    if (portMode == PORT_MODE_GPS && gpsFixValid) bits |= 0x80;
-    if (WiFi.status() == WL_CONNECTED) bits |= 0x40;
-    if (lastTxOk) bits |= 0x10;
+    if (portMode == PORT_MODE_GPS && gpsFixValid)   bits |= 0x80;  // GPS
+    if (WiFi.status() == WL_CONNECTED)              bits |= 0x40;  // WiFi
+    chargeState = detectChargeState();
+    if (chargeState == CHG_CHARGING)                bits |= 0x20;  // Chg
+    if (lastTxOk)                                   bits |= 0x10;  // TX
+    if (pressure == 0.0f && portMode == PORT_MODE_ENV) bits |= 0x08; // Err: sensore ENV in errore
+    // LoRa (bit 2, 0x04): sempre 0 fino a v2.0
+    // R2, R3 (bit 1, 0): riservati
     String packet = aprs_build_telemetry_data(rtCallsign, rtSsidAprs,
         telemetrySeq, (int)(batVoltage * 1000), WiFi.RSSI(),
         (int)((millis() - uptimeStart) / 60000), sats, bits);
@@ -1468,9 +1772,24 @@ void selectProfile() {
         delay(50);
     }
     nvs_save_int(NVS_KEY_PROFILE, activeProfile);
-    Serial.printf("[PROFILO] %s-%d (%s)\n",
-                  profiles[activeProfile].callsign, profiles[activeProfile].ssid,
-                  profiles[activeProfile].label);
+    // Ricarica variabili runtime dal profilo selezionato
+    {
+        char pkey[16];
+        String s;
+        snprintf(pkey, sizeof(pkey), "call_%d", activeProfile);
+        s = nvs_load_string(pkey, "");
+        if (s.length() == 0) s = nvs_load_string(NVS_KEY_CALLSIGN, profiles[activeProfile].callsign);
+        strncpy(rtCallsign, s.c_str(), sizeof(rtCallsign)-1); rtCallsign[sizeof(rtCallsign)-1] = '\0';
+
+        snprintf(pkey, sizeof(pkey), "pass_%d", activeProfile);
+        s = nvs_load_string(pkey, "");
+        if (s.length() == 0) s = nvs_load_string(NVS_KEY_PASSCODE, profiles[activeProfile].passcode);
+        strncpy(rtPasscode, s.c_str(), sizeof(rtPasscode)-1); rtPasscode[sizeof(rtPasscode)-1] = '\0';
+
+        snprintf(pkey, sizeof(pkey), "ssid_%d", activeProfile);
+        rtSsidAprs = nvs_load_int(pkey, nvs_load_int(NVS_KEY_SSID_APRS, profiles[activeProfile].ssid));
+    }
+    Serial.printf("[PROFILO] %s-%d\n", rtCallsign, rtSsidAprs);
 }
 
 void drawProfileMenu() {
@@ -1480,9 +1799,17 @@ void drawProfileMenu() {
     mainSprite.clear();
     mainSprite.drawString(5, 5, "Seleziona profilo:", &fonts::AsciiFont8x16);
     for (int i = 0; i < NUM_PROFILES; i++) {
+        char call_key[16], ssid_key[16], lbl_key[16];
+        snprintf(call_key, sizeof(call_key), "call_%d", i);
+        snprintf(ssid_key, sizeof(ssid_key), "ssid_%d", i);
+        snprintf(lbl_key,  sizeof(lbl_key),  "lbl_%d",  i);
+        String call = nvs_load_string(call_key, "");
+        if (call.length() == 0) call = nvs_load_string(NVS_KEY_CALLSIGN, profiles[i].callsign);
+        int ssid = nvs_load_int(ssid_key, nvs_load_int(NVS_KEY_SSID_APRS, profiles[i].ssid));
+        String lbl = nvs_load_string(lbl_key, profiles[i].label);
         snprintf(buf, sizeof(buf), "%s %s-%d %s",
                  i == activeProfile ? ">" : " ",
-                 profiles[i].callsign, profiles[i].ssid, profiles[i].label);
+                 call.c_str(), ssid, lbl.c_str());
         mainSprite.drawString(5, 28 + i * 22, buf, &fonts::AsciiFont8x16);
     }
     mainSprite.drawString(5, 105, "SU/GIU: scegli", &fonts::AsciiFont8x16);
@@ -1556,7 +1883,91 @@ button:hover{background:#005a9e}a{display:block;margin-top:15px;color:#0078d4}</
 <form method="POST" action="/update" enctype="multipart/form-data">
 <input type="file" name="firmware" accept=".bin"><br>
 <button type="submit">Carica Firmware</button></form>
-<a href="/data">Scarica dati CSV</a>
+<a href="/config">Configurazione APRS</a>
+)rawhtml"
+#if DATA_LOGGER_ENABLED
+R"rawhtml(<a href="/data">Scarica dati CSV</a>)rawhtml"
+#endif
+R"rawhtml(
+</body></html>
+)rawhtml";
+
+static const char CONFIG_HTML[] PROGMEM = R"rawhtml(
+<!DOCTYPE html><html><head><title>CoreInk-Meteo Config</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:sans-serif;max-width:540px;margin:16px auto;padding:16px}
+h2{color:#333;margin-bottom:4px}
+h3{color:#555;border-top:1px solid #ccc;padding-top:6px;margin-top:14px;margin-bottom:4px}
+label{display:block;font-weight:bold;margin-top:6px;font-size:12px}
+input{width:100%;padding:4px;margin:2px 0;box-sizing:border-box;font-size:13px}
+.row{display:flex;gap:8px}.row input{flex:1}
+button{background:#0078d4;color:#fff;border:none;padding:10px 20px;font-size:15px;cursor:pointer;border-radius:4px;margin-top:12px;width:100%}
+a{display:block;margin-top:8px;color:#0078d4;font-size:13px}
+.hint{font-size:11px;color:#777;font-weight:normal}</style></head>
+<body><h2>CoreInk-Meteo v)rawhtml" FW_VERSION R"rawhtml( &mdash; Config</h2>
+<form method="POST" action="/config">
+
+<h3>Reti WiFi <span class="hint">(prova nell'ordine 1&#8594;2&#8594;3)</span></h3>
+<label>AP 1 &#8212; SSID</label><input name="w1s" value="%W1S%" maxlength="32">
+<label>AP 1 &#8212; Password</label><input name="w1p" value="%W1P%" maxlength="63">
+<label>AP 2 &#8212; SSID</label><input name="w2s" value="%W2S%" maxlength="32">
+<label>AP 2 &#8212; Password</label><input name="w2p" value="%W2P%" maxlength="63">
+<label>AP 3 &#8212; SSID</label><input name="w3s" value="%W3S%" maxlength="32">
+<label>AP 3 &#8212; Password</label><input name="w3p" value="%W3P%" maxlength="63">
+
+<h3>Profilo attivo <span class="hint">(0=Meteo casa 1=Mobile 2=Remota)</span></h3>
+<label>Profilo selezionato (0-2)</label><input name="active_prof" value="%ACT%" maxlength="1">
+
+<h3>Profilo 0</h3>
+<label>Label</label><input name="lbl0" value="%L0%" maxlength="16">
+<div class="row">
+<div><label>Callsign</label><input name="c0" value="%C0%" maxlength="10"></div>
+<div><label>SSID APRS</label><input name="a0" value="%A0%" maxlength="3"></div>
+<div><label>Passcode</label><input name="k0" value="%K0%" maxlength="6"></div>
+</div>
+
+<h3>Profilo 1</h3>
+<label>Label</label><input name="lbl1" value="%L1%" maxlength="16">
+<div class="row">
+<div><label>Callsign</label><input name="c1" value="%C1%" maxlength="10"></div>
+<div><label>SSID APRS</label><input name="a1" value="%A1%" maxlength="3"></div>
+<div><label>Passcode</label><input name="k1" value="%K1%" maxlength="6"></div>
+</div>
+
+<h3>Profilo 2</h3>
+<label>Label</label><input name="lbl2" value="%L2%" maxlength="16">
+<div class="row">
+<div><label>Callsign</label><input name="c2" value="%C2%" maxlength="10"></div>
+<div><label>SSID APRS</label><input name="a2" value="%A2%" maxlength="3"></div>
+<div><label>Passcode</label><input name="k2" value="%K2%" maxlength="6"></div>
+</div>
+
+<h3>Posizione e APRS</h3>
+<label>Locatore Maidenhead <span class="hint">(es. IM99tl55)</span></label><input name="locator" value="%LOC%" maxlength="10">
+<label>Simbolo APRS <span class="hint">(2 char: /_ =WX  /- =Casa  // =Auto)</span></label><input name="symbol" value="%SYM%" maxlength="3">
+<label>Messaggio Status APRS</label><input name="status" value="%STA%" maxlength="60">
+
+<h3>Display e suoni</h3>
+<div class="row">
+<div><label>Volume buzzer (0-100)</label><input name="buzz_vol" value="%VOL%" maxlength="4"></div>
+<div><label>Melodia boot (0-5)</label><input name="melody" value="%MEL%" maxlength="2"></div>
+<div><label>Refresh display (sec)</label><input name="disp_ref" value="%DREF%" maxlength="4"></div>
+</div>
+
+<h3>Intervalli TX</h3>
+<div class="row">
+<div><label>Meteo (minuti)</label><input name="wx_intv" value="%WX%" maxlength="3"></div>
+<div><label>Status (minuti)</label><input name="st_intv" value="%ST%" maxlength="4"></div>
+</div>
+
+<button type="submit">&#128190; Salva configurazione</button>
+</form>
+<a href="/update">&#8593; Aggiorna firmware (OTA)</a>
+)rawhtml"
+#if DATA_LOGGER_ENABLED
+R"rawhtml(<a href="/data">Dati CSV</a>)rawhtml"
+#endif
+R"rawhtml(
 </body></html>
 )rawhtml";
 
@@ -1589,6 +2000,125 @@ void setupOTA() {
             else Update.printError(Serial);
         }
     });
+    otaServer.on("/config", HTTP_GET, []() {
+        String html = String(CONFIG_HTML);
+        // WiFi APs
+        html.replace("%W1S%", nvs_load_string(NVS_KEY_WIFI_SSID,  ""));
+        html.replace("%W1P%", nvs_load_string(NVS_KEY_WIFI_PASS,  ""));
+        html.replace("%W2S%", nvs_load_string(NVS_KEY_WIFI2_SSID, ""));
+        html.replace("%W2P%", nvs_load_string(NVS_KEY_WIFI2_PASS, ""));
+        html.replace("%W3S%", nvs_load_string(NVS_KEY_WIFI3_SSID, ""));
+        html.replace("%W3P%", nvs_load_string(NVS_KEY_WIFI3_PASS, ""));
+        // Profilo attivo
+        html.replace("%ACT%", String(activeProfile));
+        // Dati per-profilo 0/1/2
+        for (int i = 0; i < NUM_PROFILES; i++) {
+            char ck[16], pk[16], sk[16], lk[16];
+            snprintf(ck, sizeof(ck), "call_%d", i);
+            snprintf(pk, sizeof(pk), "pass_%d", i);
+            snprintf(sk, sizeof(sk), "ssid_%d", i);
+            snprintf(lk, sizeof(lk), "lbl_%d",  i);
+            String call = nvs_load_string(ck, "");
+            if (call.length() == 0) call = (i == activeProfile) ? String(rtCallsign)
+                                         : nvs_load_string(NVS_KEY_CALLSIGN, profiles[i].callsign);
+            String pass = nvs_load_string(pk, "");
+            if (pass.length() == 0 && i == activeProfile) pass = String(rtPasscode);
+            int ssid = nvs_load_int(sk, (i == activeProfile) ? rtSsidAprs : profiles[i].ssid);
+            String lbl = nvs_load_string(lk, profiles[i].label);
+            String ci = String(i);
+            html.replace("%C" + ci + "%", call);
+            html.replace("%K" + ci + "%", pass);
+            html.replace("%A" + ci + "%", String(ssid));
+            html.replace("%L" + ci + "%", lbl);
+        }
+        // Globale
+        char sym[3]; snprintf(sym, sizeof(sym), "%c%c", rtSymbolTable, rtSymbolCode);
+        html.replace("%LOC%",  rtLocator);
+        html.replace("%SYM%",  sym);
+        html.replace("%STA%",  rtAprsStatus);
+        html.replace("%VOL%",  String(nvs_load_int(NVS_KEY_BUZZER_VOLUME, BUZZER_DEFAULT_VOLUME)));
+        html.replace("%MEL%",  String(nvs_load_int(NVS_KEY_BOOT_MELODY, 2)));
+        html.replace("%DREF%", String((int)(rtDisplayUpdateMs / 1000)));
+        html.replace("%WX%",   String((int)(rtWeatherIntervalMs / 60000)));
+        html.replace("%ST%",   String((int)(rtStatusIntervalMs / 60000)));
+        otaServer.send(200, "text/html; charset=utf-8", html);
+    });
+    otaServer.on("/config", HTTP_POST, []() {
+        // WiFi APs
+        auto saveWifi = [](const char* sk, const char* pk, const char* an, const char* pn) {
+            if (otaServer.hasArg(an)) { String v = otaServer.arg(an); if (v.length()>0) nvs_save_string(sk, v.c_str()); }
+            if (otaServer.hasArg(pn)) { String v = otaServer.arg(pn); if (v.length()>0) nvs_save_string(pk, v.c_str()); }
+        };
+        saveWifi(NVS_KEY_WIFI_SSID,  NVS_KEY_WIFI_PASS,  "w1s", "w1p");
+        saveWifi(NVS_KEY_WIFI2_SSID, NVS_KEY_WIFI2_PASS, "w2s", "w2p");
+        saveWifi(NVS_KEY_WIFI3_SSID, NVS_KEY_WIFI3_PASS, "w3s", "w3p");
+        // Profilo attivo
+        if (otaServer.hasArg("active_prof")) {
+            int p = otaServer.arg("active_prof").toInt();
+            if (p >= 0 && p < NUM_PROFILES) { activeProfile = p; nvs_save_int(NVS_KEY_PROFILE, p); }
+        }
+        // Dati per-profilo 0/1/2
+        for (int i = 0; i < NUM_PROFILES; i++) {
+            char ck[16], pk[16], sk[16], lk[16];
+            snprintf(ck, sizeof(ck), "call_%d", i);
+            snprintf(pk, sizeof(pk), "pass_%d", i);
+            snprintf(sk, sizeof(sk), "ssid_%d", i);
+            snprintf(lk, sizeof(lk), "lbl_%d",  i);
+            String ci = String(i);
+            if (otaServer.hasArg("c" + ci) && otaServer.arg("c" + ci).length() > 0)
+                nvs_save_string(ck, otaServer.arg("c" + ci).c_str());
+            if (otaServer.hasArg("k" + ci) && otaServer.arg("k" + ci).length() > 0)
+                nvs_save_string(pk, otaServer.arg("k" + ci).c_str());
+            if (otaServer.hasArg("a" + ci)) {
+                int s = otaServer.arg("a" + ci).toInt();
+                if (s >= 0 && s <= 15) nvs_save_int(sk, s);
+            }
+            if (otaServer.hasArg("lbl" + ci) && otaServer.arg("lbl" + ci).length() > 0)
+                nvs_save_string(lk, otaServer.arg("lbl" + ci).c_str());
+        }
+        // Ricarica variabili runtime per il profilo attivo
+        {
+            char pkey[16];
+            snprintf(pkey, sizeof(pkey), "call_%d", activeProfile);
+            String s = nvs_load_string(pkey, "");
+            if (s.length() == 0) s = nvs_load_string(NVS_KEY_CALLSIGN, profiles[activeProfile].callsign);
+            strncpy(rtCallsign, s.c_str(), sizeof(rtCallsign)-1); rtCallsign[sizeof(rtCallsign)-1]='\0';
+
+            snprintf(pkey, sizeof(pkey), "pass_%d", activeProfile);
+            s = nvs_load_string(pkey, "");
+            if (s.length() == 0) s = nvs_load_string(NVS_KEY_PASSCODE, profiles[activeProfile].passcode);
+            strncpy(rtPasscode, s.c_str(), sizeof(rtPasscode)-1); rtPasscode[sizeof(rtPasscode)-1]='\0';
+
+            snprintf(pkey, sizeof(pkey), "ssid_%d", activeProfile);
+            rtSsidAprs = nvs_load_int(pkey, nvs_load_int(NVS_KEY_SSID_APRS, profiles[activeProfile].ssid));
+        }
+        // Globale
+        if (otaServer.hasArg("locator") && otaServer.arg("locator").length() > 0) {
+            String v = otaServer.arg("locator");
+            nvs_save_string(NVS_KEY_LOCATOR, v.c_str());
+            strncpy(rtLocator, v.c_str(), sizeof(rtLocator)-1); rtLocator[sizeof(rtLocator)-1]='\0';
+        }
+        if (otaServer.hasArg("symbol") && otaServer.arg("symbol").length() >= 2) {
+            String v = otaServer.arg("symbol");
+            nvs_save_string(NVS_KEY_SYMBOL, v.c_str());
+            rtSymbolTable = v.charAt(0); rtSymbolCode = v.charAt(1);
+        }
+        if (otaServer.hasArg("status") && otaServer.arg("status").length() > 0) {
+            String v = otaServer.arg("status");
+            nvs_save_string(NVS_KEY_APRS_STATUS, v.c_str());
+            strncpy(rtAprsStatus, v.c_str(), sizeof(rtAprsStatus)-1); rtAprsStatus[sizeof(rtAprsStatus)-1]='\0';
+        }
+        if (otaServer.hasArg("buzz_vol")) { int v = otaServer.arg("buzz_vol").toInt(); if (v>=0&&v<=100) { nvs_save_int(NVS_KEY_BUZZER_VOLUME,v); buzzer_set_volume(v); } }
+        if (otaServer.hasArg("melody"))   { int v = otaServer.arg("melody").toInt();   if (v>=0&&v<=5)   nvs_save_int(NVS_KEY_BOOT_MELODY,v); }
+        if (otaServer.hasArg("disp_ref")) { int v = otaServer.arg("disp_ref").toInt(); if (v>=10&&v<=300){ nvs_save_int(NVS_KEY_DISPLAY_REFRESH,v); rtDisplayUpdateMs=v*1000UL; } }
+        if (otaServer.hasArg("wx_intv"))  { int v = otaServer.arg("wx_intv").toInt();  if (v>=1&&v<=60)  { nvs_save_int(NVS_KEY_WEATHER_INTERVAL,v); rtWeatherIntervalMs=v*60000UL; } }
+        if (otaServer.hasArg("st_intv"))  { int v = otaServer.arg("st_intv").toInt();  if (v>=10&&v<=180){ nvs_save_int(NVS_KEY_STATUS_INTERVAL,v); rtStatusIntervalMs=v*60000UL; } }
+        Serial.printf("[Config] Salvato profilo %d: call=%s ssid=%d loc=%s sym=%c%c\n",
+                      activeProfile, rtCallsign, rtSsidAprs, rtLocator, rtSymbolTable, rtSymbolCode);
+        otaServer.send(200, "text/html; charset=utf-8",
+            "<html><head><meta charset='utf-8'><meta http-equiv='refresh' content='2;url=/config'></head>"
+            "<body><h3>&#10003; Salvato!</h3><a href='/config'>Torna</a></body></html>");
+    });
     otaServer.on("/data", HTTP_GET, []() {
 #if DATA_LOGGER_ENABLED
         logger_serve_csv(&otaServer);
@@ -1597,6 +2127,6 @@ void setupOTA() {
 #endif
     });
     otaServer.begin();
-    Serial.printf("[Web] http://%s:%d/update | /data\n", WiFi.localIP().toString().c_str(), OTA_WEB_PORT);
+    Serial.printf("[Web] http://%s:%d/update | /config | /data\n", WiFi.localIP().toString().c_str(), OTA_WEB_PORT);
 }
 #endif

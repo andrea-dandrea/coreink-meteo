@@ -36,6 +36,8 @@
   (`pressure == 0.0f` per QMP reset attivo)
 - [ ] Telemetria PARM/UNIT: rinominare R1→**LoRa** (sempre 0 fino a v2.0;
   dichiarato ora per compatibilità futura con iGate LoRa)
+- [ ] **Shutdown critico batteria**: se `!isOnUsb() && batVoltage < BAT_CRITICAL_THRESHOLD_V (3.2V)`
+  → `M5.shutdown()` immediato; warning buzzer bassa batteria a 3.5V (era 3.3V)
 
 ### WiFi state machine e screen map (implementazione codice)
 
@@ -206,6 +208,37 @@ liberando Grove Port A per il modulo LoRa UART in v2.0.
 - Grove Port A (G32/G33) **libero** → riservato LoRa v2.0
 - Rimozione completa di `portMode`, `switchPortMode()`, hot-swap e relativi menu
 - Dettaglio tecnico: [hw\_configuration.md — Mod hardware v1.3](hw_configuration.md)
+
+### Gestione energia e autonomia (deep sleep schedulato)
+
+Il dispositivo attualmente gira in loop continuo (~50–80 mA con WiFi): autonomia ~6h su 390mAh.
+Con deep sleep schedulato via BM8563 l'autonomia sale a ~48h o più.
+
+- Architettura: wake → misura → TX → `M5.shutdown(SLEEP_INTERVAL_S)` → sleep (0,5mA)
+- Intervallo sleep normale: 270s (4m50s sleep + ~10s attivo = 5 min ciclo completo)
+- Integrazione GPS: wake, attendi fix (max 30s), TX, sleep
+- Schermata e-ink "sleeping" opzionale prima dello shutdown (aggiorna immagine)
+- NVS flag `deep_sleep_enabled` (default 0 = disabilitato, retrocompatibile)
+- Prerequisito: rimozione loop continuo WiFi; FSM WiFi già implementata in v1.2.7
+
+### Modalità solare notturna (solar night mode)
+
+Uso tipico: piccolo pannello solare (1–5W) che ricarica di giorno ma non copre il consumo
+notturno. Obiettivo: ridurre il consumo nelle ore buie affinché la batteria residua a fine
+giornata arrivi all'alba successiva.
+
+- NVS flag `solar_mode` (default 0 = disabilitato)
+- NVS parametri `night_start_h` e `night_end_h` (default 22:00–07:00, ora locale BM8563)
+- Durante ore notturne:
+  - Intervallo sleep esteso: `SLEEP_INTERVAL_S × night_multiplier` (default ×6 → 30 min)
+  - WiFi disabilitato (nessun TX APRS-IS, nessun reconnect)
+  - Display aggiornato solo ogni N cicli (riduce consumo picco EPD ~26 mA)
+  - LED spento
+- Durante ore diurne: operatività normale (intervalli standard, WiFi on)
+- Sorgente orario: BM8563 RTC (disponibile offline, già usato per `M5.shutdown()`)
+- Dipendenza: `deep_sleep_enabled=1` (prerequisito — il timer RTC è il meccanismo di wake)
+- Pagina display dedicata: icona luna/sole + stato modalità + prossima transizione
+- NVS `night_multiplier` configurabile via web (`/config`) o joystick
 
 ### Bugfix da v1.2
 
