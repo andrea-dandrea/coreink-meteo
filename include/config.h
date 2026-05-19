@@ -86,7 +86,7 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define SB_TURN_MIN_ANGLE 30      // Angolo minimo (gradi) per trigger svolta
 #define SB_TURN_SLOPE 240         // Slope: angolo/velocità per trigger
 #define SB_TURN_TIME 15           // Tempo minimo (sec) tra beacon per svolta
-#define SB_MIN_DIST_M 50          // Distanza minima (m) tra beacon (filtro fermo)
+#define SB_MIN_DIST_M 100         // Distanza minima (m) tra beacon (anti-jitter GPS)
 
 // === OTA (Over-The-Air update) ===
 // Abilita aggiornamento firmware via WiFi (ArduinoOTA + Web upload).
@@ -132,7 +132,7 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define WEATHER_INTERVAL_MS 300000   // Meteo ogni 5 minuti (default)
 #define TELEMETRY_INTERVAL_MS 600000 // Telemetria ogni 10 minuti
 #define POSITION_INTERVAL_MS 0       // 0 = solo al boot se posizione fissa (no GPS)
-#define WIFI_TIMEOUT_MS 15000        // Timeout connessione WiFi
+#define WIFI_TIMEOUT_MS 8000         // Timeout connessione WiFi
 #define WIFI_MENU_TIMEOUT_S 60       // Timeout schermata selezione WiFi al boot (S2)
 
 // === Display ===

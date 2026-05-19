@@ -1,0 +1,17 @@
+wifi: handover lento de un AP a otro, tarare i tempi di attesa senza che siano costrittivi per altre procedure
+logger: data logger assente, eliminato anche menu dal web server
+GPS: dati aggiuntivi GPS assenti: dettaglio GPS/Beidou, dati specifici per satellite, ora da satellite;
+GPS: considerare la possibilta di mappare l'HDOP nella variabile Rsvd, se apporta dati interessanti (non so cos'e); in alternativa registrare in Sat il numero di satelliti GPS e in Rsvd il numero di satellit Beidou.
+schermo 0: schermo di boot assente
+schermo 1: ora, manca ":" e conviene spostarlo in alto a destra per maggiore visibilità
+schermo 1: come unita di misura di pressione usare mbar invece di hPa (è lo stesso numericamente)
+schermo 1: l'unita di misura della temperatura è "ºC" e non "C"
+schermo 2: in modo ENV compare l'avviso di schiacciare exp per attivare il modo GPS, pero se si schiaccia EXT non succede nulla (alla fin fine c'è gia lo schermo 7 pre farlo).
+schermo 1 e 3: aggiungere un "warning" in testo accanto alla tensione de batteria quando questa scende nella zona del warning acustico; inoltre ho verificato che dallo stato warning intorno ai 3,40 la tensione precipita a 3,05 rapidamente negli ultimi minuti, forme non guasta che sotto i 3,30 o 3,20 cominci a fare bip in modo insistente. per avere dati piu chiari dell'andamento servirebbe il logger attivo.
+schermo 3: aggiungere ora del last TX; indicare l'uptime come hh:mm, uguale allo schermo 9.
+schermo 4: eliminare dallo schermo la pass, è un dato sensibile. togliere anche il call perche è gia mostrato nella prima fila. le linee vuote si riuseranno in altro modo.
+schermo 7: schiaccio ext per cambiare sensore, mantengo schiacciato ext per menu emergenza, conviene scrivere nella parte bassa il fatto che c'è anche la pressione prolungata del ext, in ogni caso mi rimangono dubbi sul menu contestuale, dove avavamo detto che mid era il bottone per fare una scelta a quel livello.
+schermo 8: c'è il supporto NOAA ma non quello di openweather, aggiungerlo almeno in modo testo, anche se per il futuro sarebbe bello avere delle bitmap rappresentando il tempo, la luna etc.
+qualsiasi schermo: quando si cambia schermo usando il joystick c'è un refresh, in piu il coreink fa un refresh cada minuto; a volte uno commuta schermo e subito dopo viene un refresh; converrebbe rimettere a zero il contatore del minuto di refresh dopo che è stato fatto un refresh per cambio di schermo
+APRS: ci sono molti telegrammi raw con l'avviso [Duplicate position packet] e uno con l'avviso [Location changes too fast (adaptive limit)]
+batteria: il consumo è visibilmente piu alto in modo GPS che in modo ENV, forse si puo ridurre l'invio di pacchetti GPS, francamente non dovrebbe spostarsi molto la stazione. In ogni caso prima o poi dovró studiare l'idea di un pannello solare per incrementare l'autonomia perche la batteria interna proprio non ce la fa da sola.

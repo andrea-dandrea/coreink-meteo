@@ -163,6 +163,7 @@ WifiState wifiState   = WIFI_ST_OFF;
 WifiState wifiStatePrev = WIFI_ST_OFF;
 unsigned long wifiRetryTime    = 0;
 int           wifiRetryBackoff = 15000;
+int           wifiApIdx        = 0;   // Indice AP corrente nel ciclo round-robin (0-2)
 
 // === SmartBeacon: posizione dell'ultimo beacon (filtro delta) ===
 float sbLastTxLat  = 0.0f;
@@ -206,6 +207,7 @@ void readGps();
 void switchPortMode(int newMode);
 void drawPortModeNotice();
 void writeLogRecord();
+void showPage6Menu();
 String latlon_to_maidenhead(float lat, float lon);
 bool isOnUsb();
 ChargeState detectChargeState();
@@ -268,6 +270,34 @@ void setup() {
     StickCP2.Display.setRotation(1);
     StickCP2.Display.setTextSize(1);
 #endif
+
+    // ── BOOT SPLASH ──────────────────────────────────────────────────────────────
+    // WiFi parte NON-BLOCCANTE prima del pushSprite: lo stack ESP32 connette
+    // in background durante i ~6.5s del boot splash (1.5s e-ink + 5s delay).
+    // WiFi.begin() senza argomenti usa le ultime credenziali connesse con successo
+    // (ESP32 flash interno) → non sovrascrive last-known-AP, evita 7.5s sprecati.
+    if (nvs_load_int(NVS_KEY_WIFI_ENABLED, 1) != 0) {
+        WiFi.mode(WIFI_STA);
+        WiFi.begin();  // usa last-known-AP dall'ESP32 flash (preserva credenziali corrette)
+    }
+#if defined(BOARD_COREINK)
+    {
+        char bb[40];
+        mainSprite.clear();
+        mainSprite.drawString((200 - 13*8)/2, 36,  "CoreInk-Meteo",    &fonts::AsciiFont8x16);
+        snprintf(bb, sizeof(bb), "v%s", FW_VERSION);
+        mainSprite.drawString((200 - (int)strlen(bb)*8)/2, 62,  bb,                 &fonts::AsciiFont8x16);
+        mainSprite.drawString((200 - 17*8)/2, 100, "Avvio in corso...", &fonts::AsciiFont8x16);
+        snprintf(bb, sizeof(bb), "Porta: %s",
+                 portMode == PORT_MODE_ENV ? "ENV III" : "GPS");
+        mainSprite.drawString((200 - (int)strlen(bb)*8)/2, 130, bb,                 &fonts::AsciiFont8x16);
+        mainSprite.pushSprite();  // ~1.5s bloccante: splash sull'e-ink (WiFi in background)
+        delay(5000);              // 5s visibile: WiFi continua a connettersi in background
+    }
+#endif
+    // Prima lettura ENV
+    if (portMode == PORT_MODE_ENV) readSensors();
+    // ─────────────────────────────────────────────────────────────────────────────
 
     // Selezione profilo al boot
     selectProfile();
@@ -333,18 +363,24 @@ void setup() {
     // WiFi
     wifiEnabled = nvs_load_int(NVS_KEY_WIFI_ENABLED, 1) != 0;
     if (wifiEnabled) {
-        WiFi.mode(WIFI_STA);
-
+        // WiFi.mode(WIFI_STA) e WiFi.begin() già chiamati nel boot splash (non-bloccanti)
         // DOWN premuto al boot = reset credenziali WiFi
         M5.update();
         if (M5.BtnDOWN.isPressed()) {
             Serial.println("[WiFi] Reset credenziali (DOWN premuto)");
             WiFiManager wmReset;
             wmReset.resetSettings();
+            WiFi.disconnect(true);
             buzzer_play_event(BUZZ_CONFIRM);
         }
 
-        connectWiFi();
+        // Attende ancora un po' se lo stack WiFi è quasi connesso
+        if (WiFi.status() != WL_CONNECTED) {
+            unsigned long _wt = millis() + 1500;
+            while (WiFi.status() != WL_CONNECTED && millis() < _wt) delay(100);
+        }
+        // connectWiFi() solo se non già connesso in background
+        if (WiFi.status() != WL_CONNECTED) connectWiFi();
         if (WiFi.status() != WL_CONNECTED) {
             showWifiMenu();  // S2: menu WiFi con timeout, senza AP automatico
         }
@@ -478,15 +514,8 @@ void loop() {
         lastWeatherTime = now;
     }
 
-    // Posizione: SmartBeacon se GPS, altrimenti non ripetere (è fissa)
-    bool sbActive = false;
-#if SMARTBEACON_ENABLED
-    sbActive = (portMode == PORT_MODE_GPS);
-#endif
-    if (sbActive && (now - lastPositionTime >= WEATHER_INTERVAL_MS)) {
-        if (canTx && gpsFixValid) sendPositionPacket();
-        lastPositionTime = now;
-    }
+    // Posizione GPS: gestita esclusivamente da SmartBeacon (blocco sopra).
+    // BUG-02: rimosso timer 5-min che causava duplicate position packet ogni ciclo meteo.
 
     // Telemetria ogni TELEMETRY_INTERVAL_MS (default 10 min)
     if (now - lastTelemetryTime >= TELEMETRY_INTERVAL_MS) {
@@ -531,7 +560,7 @@ void loop() {
     // === Pulsanti ===
     M5.update();
 #if defined(BOARD_COREINK)
-    // MID: long (3s) → WiFiManager | short → azione contestuale per pagina
+    // MID: long (5s) → WiFiManager | short → menu contestuale della pagina corrente
     {
         static bool midLongFired = false;
         if (!midLongFired && M5.BtnMID.pressedFor(5000)) {
@@ -540,8 +569,12 @@ void loop() {
         }
         if (M5.BtnMID.wasReleased()) {
             if (!midLongFired) {
-                // MID short: azione contestuale per pagina (nessuna azione globale)
-                // future versioni: azione per pagina attiva
+                // MID short: menu contestuale (per ora implementato solo P6)
+                if (currentPage == 6) {
+                    showPage6Menu();
+                    M5.update();  // consuma eventi tasto pendenti dopo menu (evita reinvocazione)
+                }
+                // v1.3: ogni pagina avrà il proprio menu (ui_button_model.md)
             }
             midLongFired = false;
         }
@@ -550,33 +583,28 @@ void loop() {
         currentPage = (currentPage - 1 + NUM_PAGES) % NUM_PAGES;
         buzzer_play_event(BUZZ_PAGE);
         updateDisplay();
+        lastDisplayTime = millis();  // BUG-11: evita refresh automatico subito dopo cambio pagina
     }
     if (M5.BtnDOWN.wasPressed()) {
         currentPage = (currentPage + 1) % NUM_PAGES;
         buzzer_play_event(BUZZ_PAGE);
         updateDisplay();
+        lastDisplayTime = millis();  // BUG-11: evita refresh automatico subito dopo cambio pagina
     }
-    // EXT: long (2s) → WiFi emergenza (showWifiMenu) | short → cambia porta (solo pagina 6)
+    // EXT: long (3s) → menu emergenza WiFi | short → nessuna azione (ui_button_model.md)
     {
         static bool extLongFired = false;
-        if (!extLongFired && M5.BtnEXT.pressedFor(2000)) {
+        if (!extLongFired && M5.BtnEXT.pressedFor(3000)) {
             extLongFired = true;
             showWifiMenu();
             M5.update();  // Aggiorna stato tasto dopo blocco
-            if (!M5.BtnEXT.isPressed()) extLongFired = false;  // Gia' rilasciato dentro showWifiMenu
+            if (!M5.BtnEXT.isPressed()) extLongFired = false;
             updateDisplay();
+            lastDisplayTime = millis();
         }
         if (M5.BtnEXT.wasReleased()) {
-            if (!extLongFired && currentPage == 6) {
-                int newMode = (portMode == PORT_MODE_ENV) ? PORT_MODE_GPS : PORT_MODE_ENV;
-                switchPortMode(newMode);
-                nvs_save_int(NVS_KEY_PORT_MODE, portMode);
-                buzzer_play_event(BUZZ_CONFIRM);
-                drawPortModeNotice();
-                delay(2000);
-            }
+            // EXT short: nessuna azione in navigazione (per il modello ui_button_model.md)
             extLongFired = false;
-            updateDisplay();
         }
     }
 #elif defined(BOARD_STICKCPLUS2)
@@ -683,18 +711,41 @@ void wifi_update() {
                 wifiState = WIFI_ST_DISCONNECTED;
                 wifiStatePrev = WIFI_ST_CONNECTED;
                 wifiRetryTime = now;
-                wifiRetryBackoff = 15000;
+                wifiRetryBackoff = 2000;  // Primo retry rapido; aumenta dopo ogni ciclo completo
+                wifiApIdx = 0;            // Riparti da AP1 al prossimo tentativo
                 led_set_state(LED_SLOW);
             }
             break;
         case WIFI_ST_DISCONNECTED:
             if (now - wifiRetryTime >= (unsigned long)wifiRetryBackoff) {
+                // Ciclo round-robin tra i 3 AP NVS: AP1 → AP2 → AP3 → AP1 ...
+                // Ogni ciclo completo aumenta il backoff inter-ciclo (max 60s).
+                static const char* apSsidKeys[] = { NVS_KEY_WIFI_SSID, NVS_KEY_WIFI2_SSID, NVS_KEY_WIFI3_SSID };
+                static const char* apPassKeys[] = { NVS_KEY_WIFI_PASS, NVS_KEY_WIFI2_PASS, NVS_KEY_WIFI3_PASS };
+                String apSsid = "", apPass = "";
+                // Trova il prossimo AP configurato (salta le voci SSID vuote)
+                for (int t = 0; t < 3; t++) {
+                    int idx = wifiApIdx % 3;
+                    apSsid = nvs_load_string(apSsidKeys[idx], "");
+                    apPass = nvs_load_string(apPassKeys[idx], "");
+                    wifiApIdx++;
+                    if (apSsid.length() > 0) break;
+                }
+                if (apSsid.length() > 0) {
+                    Serial.printf("[WiFi FSM] Retry AP%d: %s\n", ((wifiApIdx - 1) % 3) + 1, apSsid.c_str());
+                    WiFi.begin(apSsid.c_str(), apPass.c_str());
+                } else {
+                    WiFi.begin();  // Nessun AP in NVS: usa credenziali salvate dall'SDK
+                }
                 wifiStatePrev = WIFI_ST_DISCONNECTED;
                 wifiState = WIFI_ST_CONNECTING;
                 wifiRetryTime = now;
-                WiFi.begin();
-                if (wifiRetryBackoff < 60000) wifiRetryBackoff *= 2;
-                if (wifiRetryBackoff > 60000) wifiRetryBackoff = 60000;
+                // Backoff breve tra AP dello stesso ciclo; aumenta esponenzialmente dopo ogni ciclo completo
+                if ((wifiApIdx % 3) == 0) {
+                    if (wifiRetryBackoff < 60000) wifiRetryBackoff = min(wifiRetryBackoff * 2, 60000);
+                } else {
+                    wifiRetryBackoff = 2000;  // 2s tra un AP e il successivo
+                }
             }
             break;
         case WIFI_ST_WAITING:
@@ -1180,6 +1231,73 @@ void drawPortModeNotice() {
 }
 
 // ============================================================================
+// MENU CONTESTUALE P6 — Sensori ENV/GPS  (ui_button_model.md, livello 2)
+// Attivato da MID short quando currentPage == 6.
+// Opzioni: 1=Forza lettura  2=Commuta ENV/GPS
+// Navigazione: UP/DOWN  |  MID = esegui  |  EXT = annulla  |  timeout 10s
+// ============================================================================
+void showPage6Menu() {
+    static const char* items[] = { "1. Forza lettura", "2. Commuta ENV/GPS" };
+    const int nItems = 2;
+    int sel = 0;
+    unsigned long deadline = millis() + 10000UL;
+    bool done = false;
+
+    auto redraw = [&]() {
+#if defined(BOARD_COREINK)
+        M5.M5Ink.clear();
+        Ink_Sprite& sp = mainSprite;
+        sp.clear();
+        char hdr[24];
+        snprintf(hdr, sizeof(hdr), "%s-%d", rtCallsign, rtSsidAprs);
+        sp.drawString(2, 0, hdr, &fonts::AsciiFont8x16);
+        sp.drawString(5, 20, "=== Menu Sensori ===", &fonts::AsciiFont8x16);
+        for (int i = 0; i < nItems; i++) {
+            char line[32];
+            snprintf(line, sizeof(line), "%s %s", i == sel ? ">" : " ", items[i]);
+            sp.drawString(5, 46 + i * 22, line, &fonts::AsciiFont8x16);
+        }
+        int rem = (int)((deadline - millis()) / 1000);
+        char foot[40];
+        snprintf(foot, sizeof(foot), "MID:ok  EXT:annulla  %ds", rem > 0 ? rem : 0);
+        sp.drawString(2, 182, foot, &fonts::AsciiFont8x16);
+        sp.pushSprite();
+#endif
+    };
+
+    redraw();
+
+    while (millis() < deadline && !done) {
+        M5.update();
+        if (M5.BtnUP.wasPressed() || M5.BtnDOWN.wasPressed()) {
+            sel = (sel + (M5.BtnDOWN.wasPressed() ? 1 : -1) + nItems) % nItems;
+            deadline = millis() + 10000UL;  // reset timeout su navigazione
+            redraw();
+        }
+        if (M5.BtnMID.wasPressed()) {
+            buzzer_play_event(BUZZ_CONFIRM);
+            if (sel == 0) {
+                readSensors(); delay(200); readSensors();  // doppia lettura warmup
+            } else if (sel == 1) {
+                int newMode = (portMode == PORT_MODE_ENV) ? PORT_MODE_GPS : PORT_MODE_ENV;
+                switchPortMode(newMode);
+                nvs_save_int(NVS_KEY_PORT_MODE, portMode);
+                drawPortModeNotice();
+                delay(2000);
+            }
+            done = true;
+        }
+        if (M5.BtnEXT.wasPressed()) {
+            buzzer_play_event(BUZZ_PAGE);
+            done = true;
+        }
+        delay(50);
+    }
+    lastDisplayTime = millis();
+    updateDisplay();
+}
+
+// ============================================================================
 // Lat/Lon -> Maidenhead
 // ============================================================================
 String latlon_to_maidenhead(float lat, float lon) {
@@ -1222,7 +1340,7 @@ void drawPage(int page) {
     M5.M5Ink.clear();
     mainSprite.clear();
 
-    // Header: nominativo | pagina | versione
+    // Header: nominativo | pagina | versione (tutte le pag.) + ora (solo pag.1, riga 2)
     snprintf(buf, sizeof(buf), "%s-%d", rtCallsign, rtSsidAprs);
     mainSprite.drawString(2, 0, buf, &fonts::AsciiFont8x16);
     snprintf(buf, sizeof(buf), "%d/%d", page + 1, NUM_PAGES);
@@ -1230,22 +1348,27 @@ void drawPage(int page) {
     snprintf(buf, sizeof(buf), "v%s", FW_VERSION);
     int vx = 200 - (strlen(buf) * 8);
     mainSprite.drawString(vx, 0, buf, &fonts::AsciiFont8x16);
+    if (page == 0) {  // ora in top-right riga 3 (altezza umidità), x diverso → no overlap
+        struct tm tiHdr;
+        char tbuf[8] = "--:--";
+        if (getLocalTime(&tiHdr)) snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tiHdr.tm_hour, tiHdr.tm_min);
+        int tx = 200 - (strlen(tbuf) * 8);
+        mainSprite.drawString(tx, 38, tbuf, &fonts::AsciiFont8x16);
+    }
 
     switch (page) {
 
     case 0: { // === Principale: meteo + posizione ===
-        struct tm ti;
-        if (getLocalTime(&ti)) {
-            snprintf(buf, sizeof(buf), "Ora %02d:%02d", ti.tm_hour, ti.tm_min);
-            mainSprite.drawString(2, 188, buf, &fonts::AsciiFont8x16);
-        }
         snprintf(buf, sizeof(buf), "T: %.1f C", temperature);
         mainSprite.drawString(5, 20, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "H: %.1f %%", humidity);
         mainSprite.drawString(5, 38, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "P: %.1f hPa", pressure);
+        snprintf(buf, sizeof(buf), "P: %.1f mbar", pressure);  // BUG-05
         mainSprite.drawString(5, 56, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Bat: %.2fV", batVoltage);
+        {   // BUG-07: warning visivo batteria
+            const char* bw = batVoltage < 3.3f ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
+            snprintf(buf, sizeof(buf), "Bat: %.2fV%s", batVoltage, bw);
+        }
         mainSprite.drawString(5, 78, buf, &fonts::AsciiFont8x16);
 
         // Coordinate alternanti
@@ -1293,8 +1416,8 @@ void drawPage(int page) {
         mainSprite.drawString(5, 20, "=== GPS Dettaglio ===", &fonts::AsciiFont8x16);
         if (portMode != PORT_MODE_GPS) {
             mainSprite.drawString(5, 60, "GPS non attivo", &fonts::AsciiFont8x16);
-            mainSprite.drawString(5, 80, "Premi EXT per", &fonts::AsciiFont8x16);
-            mainSprite.drawString(5, 100, "attivare modo GPS", &fonts::AsciiFont8x16);
+            mainSprite.drawString(5, 80, "Vai a pag.7,", &fonts::AsciiFont8x16);
+            mainSprite.drawString(5, 100, "premi MID per GPS", &fonts::AsciiFont8x16);  // BUG-08
             break;
         }
 #if GPS_EXTRA_ENABLED
@@ -1357,9 +1480,15 @@ void drawPage(int page) {
         if (n == 0) mainSprite.drawString(5, 60, "Nessun satellite", &fonts::AsciiFont8x16);
 #else
         mainSprite.drawString(5, 20, "=== Stato ===", &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Vbat: %.2f V", batVoltage);
+        {   // BUG-07: warning batteria
+            const char* bw2 = batVoltage < 3.3f ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
+            snprintf(buf, sizeof(buf), "Vbat: %.2fV%s", batVoltage, bw2);
+        }
         mainSprite.drawString(5, 42, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Uptime: %lum", (millis() - uptimeStart) / 60000UL);
+        {   // BUG-09: uptime hh:mm
+            int upM = (millis() - uptimeStart) / 60000;
+            snprintf(buf, sizeof(buf), "Uptime: %dh %dm", upM / 60, upM % 60);
+        }
         mainSprite.drawString(5, 62, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "WiFi: %s", WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "no conn");
         mainSprite.drawString(5, 82, buf, &fonts::AsciiFont8x16);
@@ -1367,6 +1496,8 @@ void drawPage(int page) {
         mainSprite.drawString(5, 100, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "RSSI: %d dBm", WiFi.RSSI());
         mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
+        snprintf(buf, sizeof(buf), "TX: %s %s", lastTxTime, lastTxOk ? "OK" : "FAIL");  // BUG-09
+        mainSprite.drawString(5, 136, buf, &fonts::AsciiFont8x16);
 #endif
         break;
     }
@@ -1388,13 +1519,11 @@ void drawPage(int page) {
             mainSprite.drawString(5, 40 + i * 18, buf, &fonts::AsciiFont8x16);
         }
         mainSprite.drawString(5, 100, "--- NVS attivi ---", &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Call: %s", rtCallsign);
+        snprintf(buf, sizeof(buf), "Loc: %s", rtLocator);
         mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Pass: %s", rtPasscode);
+        snprintf(buf, sizeof(buf), "Sym: %c%c", rtSymbolTable, rtSymbolCode);
         mainSprite.drawString(5, 136, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Loc: %s  Sym: %c%c", rtLocator, rtSymbolTable, rtSymbolCode);
-        mainSprite.drawString(5, 154, buf, &fonts::AsciiFont8x16);
-        mainSprite.drawString(5, 172, "MID 3s: configura", &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 154, "MID 5s: configura", &fonts::AsciiFont8x16);
         break;
     }
 
@@ -1452,7 +1581,8 @@ void drawPage(int page) {
         mainSprite.drawString(5, 76, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "Porta: %s", portMode == PORT_MODE_ENV ? "ENV III" : "GPS");
         mainSprite.drawString(5, 100, buf, &fonts::AsciiFont8x16);
-        mainSprite.drawString(5, 150, "EXT: cambia ENV/GPS", &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 150, "MID: menu", &fonts::AsciiFont8x16);  // BUG-10
+        mainSprite.drawString(5, 168, "EXT 3s: emergenza", &fonts::AsciiFont8x16);
         break;
     }
 
@@ -1643,11 +1773,11 @@ void sendPositionPacket() {
         packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
             gpsLat, gpsLon, rtSymbolTable, rtSymbolCode,
             comment);
-        // SmartBeacon: filtro distanza minima da fermo
+        // BUG-03: filtro distanza indipendente dalla velocità (anti-jitter GPS)
         if (sbLastTxValid) {
             float dist = haversineM(sbLastTxLat, sbLastTxLon, gpsLat, gpsLon);
-            if (gpsSpeed < SB_SLOW_SPEED && dist < SB_MIN_DIST_M) {
-                Serial.printf("[APRS-POS] Skip SmartBeacon: fermo, dist=%.0fm\n", dist);
+            if (dist < SB_MIN_DIST_M) {
+                Serial.printf("[APRS-POS] Skip: dist=%.0fm < %dm (jitter)\n", dist, SB_MIN_DIST_M);
                 return;
             }
         }
@@ -1748,7 +1878,7 @@ void sendStatusPacket() {
 void selectProfile() {
     drawProfileMenu();
     unsigned long start = millis();
-    while (millis() - start < 5000) {
+    while (millis() - start < 5000) {  // 5s: mostra profilo, utente può cambiarlo
         M5.update();
 #if defined(BOARD_COREINK)
         if (M5.BtnUP.wasPressed() || M5.BtnEXT.wasPressed()) {
