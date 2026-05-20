@@ -4,7 +4,7 @@
 
 static bool _enabled = true;
 static int _volume = BUZZER_DEFAULT_VOLUME;
-static bool _eventFlags[10] = {true, true, true, true, true, true, true, true, true, true};
+static bool _eventFlags[11] = {true, true, true, true, true, true, true, true, true, true, true};
 
 void buzzer_init() {
     ledcSetup(0, 2000, 8);  // Channel 0, 2kHz default, 8-bit
@@ -73,6 +73,13 @@ void buzzer_play_event(BuzzerEvent event) {
             break;
         case BUZZ_BAT_LOW:
             buzzer_tone(1000, 500);
+            break;
+        case BUZZ_BAT_CRITICAL:
+            buzzer_tone(800, 200);
+            delay(60);
+            buzzer_tone(800, 200);
+            delay(60);
+            buzzer_tone(800, 200);
             break;
         case BUZZ_PAGE:
             buzzer_tone(4000, 50);

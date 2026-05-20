@@ -113,7 +113,8 @@ const StationProfile profiles[NUM_PROFILES] = {
 // === Batteria ===
 #define BAT_ADC_PIN 35            // Pin ADC per lettura tensione batteria
 #define BAT_USB_THRESHOLD_V 4.4f  // Vbat > soglia => USB collegata (backdrive SY7088)
-#define BAT_LOW_THRESHOLD_V 3.5f  // Vbat < soglia => batteria bassa: LED_FAST + buzzer
+#define BAT_LOW_THRESHOLD_V 3.5f   // Vbat < soglia => batteria bassa ("LOW"): LED_FAST + buzzer ogni 60s
+#define BAT_WARN_THRESHOLD_V 3.3f   // Vbat < soglia => batteria critica ("!!!"): buzzer ogni 30s
 #define BAT_CRITICAL_THRESHOLD_V 3.2f // Vbat < soglia => batteria critica: shutdown
 // Il CoreInk usa un partitore 25.1/5.1 — la conversione è gestita nel codice
 // con esp_adc_cal per maggiore precisione.

@@ -107,6 +107,9 @@ HardwareSerial gpsSerial(1);
 bool gpsFixValid = false;
 float gpsLat = 0.0;
 float gpsLon = 0.0;
+float lastGpsLat = 0.0f;   // Ultima posizione GPS valida (persiste dopo commuta a ENV)
+float lastGpsLon = 0.0f;
+bool  lastGpsPosValid = false;
 float gpsAlt = 0.0;
 float gpsSpeed = 0.0;
 float gpsCourse = 0.0;
@@ -639,7 +642,16 @@ void loop() {
             // Batteria critica: spegni il dispositivo (BM8563 de-asserta PS_EN)
             // TODO v1.3: mostrare schermata "Batteria critica" prima dello spegnimento
             M5.shutdown();
+        } else if (batVoltage < BAT_WARN_THRESHOLD_V) {
+            // Batteria !!!: 3.2-3.3 V — buzzer urgente ogni 30s
+            led_set_state(LED_FAST);
+            static unsigned long lastBatCrit = 0;
+            if (now - lastBatCrit > 30000) {
+                buzzer_play_event(BUZZ_BAT_CRITICAL);
+                lastBatCrit = now;
+            }
         } else if (batVoltage < BAT_LOW_THRESHOLD_V) {
+            // Batteria LOW: 3.3-3.5 V — buzzer ogni 60s
             led_set_state(LED_FAST);
             static unsigned long lastBatWarn = 0;
             if (now - lastBatWarn > 60000) {
@@ -1148,6 +1160,9 @@ void readGps() {
         gpsLat = gps.location.lat();
         gpsLon = gps.location.lng();
         gpsFixValid = true;
+        lastGpsLat = gpsLat;  // Aggiorna posizione sticky
+        lastGpsLon = gpsLon;
+        lastGpsPosValid = true;
     }
     if (gps.altitude.isUpdated()) gpsAlt = gps.altitude.meters();
     if (gps.speed.isUpdated()) gpsSpeed = gps.speed.kmph();
@@ -1204,6 +1219,9 @@ void switchPortMode(int newMode) {
         Serial.println("[PORT] GPS (UART) attivo");
     }
     portMode = newMode;
+    if (newMode == PORT_MODE_ENV) {
+        readSensors();  // Prima lettura obbligatoria dopo switch (dati non possono restare a 0)
+    }
 }
 
 void drawPortModeNotice() {
@@ -1284,6 +1302,11 @@ void showPage6Menu() {
                 nvs_save_int(NVS_KEY_PORT_MODE, portMode);
                 drawPortModeNotice();
                 delay(2000);
+                if (portMode == PORT_MODE_ENV) {
+                    // switchPortMode() ha già chiamato readSensors()
+                    lastWeatherTime = 0;  // Forza TX meteo immediato (include posizione sticky)
+                }
+                // In GPS mode: SmartBeacon invia automaticamente al primo fix valido
             }
             done = true;
         }
@@ -1366,7 +1389,7 @@ void drawPage(int page) {
         snprintf(buf, sizeof(buf), "P: %.1f mbar", pressure);  // BUG-05
         mainSprite.drawString(5, 56, buf, &fonts::AsciiFont8x16);
         {   // BUG-07: warning visivo batteria
-            const char* bw = batVoltage < 3.3f ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
+            const char* bw = batVoltage < BAT_WARN_THRESHOLD_V ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
             snprintf(buf, sizeof(buf), "Bat: %.2fV%s", batVoltage, bw);
         }
         mainSprite.drawString(5, 78, buf, &fonts::AsciiFont8x16);
@@ -1481,7 +1504,7 @@ void drawPage(int page) {
 #else
         mainSprite.drawString(5, 20, "=== Stato ===", &fonts::AsciiFont8x16);
         {   // BUG-07: warning batteria
-            const char* bw2 = batVoltage < 3.3f ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
+            const char* bw2 = batVoltage < BAT_WARN_THRESHOLD_V ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
             snprintf(buf, sizeof(buf), "Vbat: %.2fV%s", batVoltage, bw2);
         }
         mainSprite.drawString(5, 42, buf, &fonts::AsciiFont8x16);
@@ -1730,6 +1753,11 @@ void sendWeatherPacket() {
         packet = aprs_build_weather_packet(rtCallsign, rtSsidAprs,
             gpsLat, gpsLon, rtSymbolTable, rtSymbolCode,
             temperature, humidity, pressure);
+    } else if (lastGpsPosValid) {
+        // FIX: dopo commuta GPS->ENV usa ultima posizione GPS nota
+        packet = aprs_build_weather_packet(rtCallsign, rtSsidAprs,
+            lastGpsLat, lastGpsLon, rtSymbolTable, rtSymbolCode,
+            temperature, humidity, pressure);
     } else {
         packet = aprs_build_weather_packet(rtCallsign, rtSsidAprs,
             rtLocator, rtSymbolTable, rtSymbolCode,
@@ -1781,6 +1809,10 @@ void sendPositionPacket() {
                 return;
             }
         }
+    } else if (lastGpsPosValid) {
+        // FIX: dopo commuta GPS->ENV usa ultima posizione GPS nota
+        packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
+            lastGpsLat, lastGpsLon, rtSymbolTable, rtSymbolCode, comment);
     } else {
         packet = aprs_build_position_packet(rtCallsign, rtSsidAprs,
             rtLocator, rtSymbolTable, rtSymbolCode, comment);

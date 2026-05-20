@@ -12,6 +12,7 @@ enum BuzzerEvent {
     BUZZ_WIFI_OK,
     BUZZ_WIFI_LOST,
     BUZZ_BAT_LOW,
+    BUZZ_BAT_CRITICAL,
     BUZZ_PAGE,
     BUZZ_CONFIRM,
     BUZZ_BOOT

@@ -1,8 +1,12 @@
 # CoreInk-Meteo — Manuale Utente
 
-**Versione**: v1.2.8 (coreink_lite)  
+**Versione**: v1.2.9 (coreink_lite)  
 **Autori**: EA5JDG / IZ3ARR  
 **Hardware**: M5Stack CoreInk + ENV III + GPS/BDS (AT6558)
+
+> **Nota di tracciabilità**: Questo manuale documenta il firmware **v1.2.9**.
+> Nelle versioni future l'interfaccia, le schermate e le funzioni potranno cambiare in modo significativo.
+> Ogni versione del firmware dispone del proprio manuale corrispondente.
 
 ---
 
@@ -118,7 +122,7 @@ corrente (es. `3/9`) appare nell'header in alto a sinistra.
 
 Dati meteo e stato stazione in tempo reale:
 - Temperatura, umidità, pressione atmosferica (in mbar)
-- Batteria con warning visivo (`LOW` <3.5 V, `!!!` <3.3 V)
+- Batteria con warning visivo (`LOW` <3.5 V, `!!!` <3.3 V) e buzzer
 - Localizzatore Maidenhead o coordinate GPS (alternano ad ogni aggiornamento)
 - Altitudine, velocità, rotta (solo se GPS attivo e fix valido)
 - Satelliti e HDOP (solo se GPS)
@@ -137,7 +141,7 @@ Informazioni dettagliate GPS:
 ### Pagina 3 — Stato (case 2)
 
 Diagnostica stazione:
-- Batteria con warning visivo
+- Batteria con warning visivo (`LOW` <3.5 V, `!!!` <3.3 V) e buzzer
 - Uptime (formato `Xh Ym`)
 - SSID WiFi connesso / "non connesso"
 - IP address, RSSI
@@ -196,8 +200,8 @@ Informazioni sistema:
 
 Tutti i parametri sono salvati in NVS (persistenti tra riavvii e aggiornamenti OTA).
 
-> **Nota build `coreink_lite`**: i parametri Buzzer, Data Logger, BLE e API esterne
-> non sono attivi nella build corrente (v1.2.8). Saranno disponibili in v1.3.
+> **Nota build `coreink_lite` (v1.2.9)**: il modulo Buzzer è attivo dalla v1.2.9.
+> Data Logger, BLE e API esterne non sono attivi nella build corrente. Saranno disponibili in v1.3.
 
 ### Stazione APRS
 
@@ -315,7 +319,7 @@ AT6558 + MAX2659 (M5Stack GPS/BDS Unit), comunicazione UART 9600 baud.
 
 ## 10. Data Logger *(v1.3)* <a name="data-logger"></a>
 
-> *Funzionalità non disponibile in `coreink_lite` (v1.2.8). Disponibile in v1.3.*
+> *Funzionalità non disponibile in `coreink_lite` (v1.2.9). Disponibile in v1.3.*
 
 ### Formato record (30 bytes)
 
@@ -351,9 +355,9 @@ AT6558 + MAX2659 (M5Stack GPS/BDS Unit), comunicazione UART 9600 baud.
 
 ---
 
-## 11. Buzzer e audio *(v1.3)* <a name="buzzer"></a>
+## 11. Buzzer e audio <a name="buzzer"></a>
 
-> *Funzionalità non disponibile in `coreink_lite` (v1.2.8). Disponibile in v1.3.*
+> *Attivo nella build `coreink_lite` dalla v1.2.9.*
 
 Buzzer passivo su GPIO2. Suoni via PWM con frequenza e durata variabili.
 
@@ -387,6 +391,15 @@ Batteria interna: 390 mAh @ 3.7V. Autonomia stimata:
 - Solo GPS + display: ~4 ore
 - Offline (no WiFi, no BT): ~6 ore
 
+#### Livelli di allerta batteria
+
+| Livello | Tensione | Indicatore display | LED | Buzzer | Azione |
+|---------|----------|--------------------|-----|--------|--------|
+| Normale | ≥3.5 V | — | lento | — | — |
+| **LOW** | 3.3–3.5 V | `LOW` in P1 e P3 | rapido | 1 bip ogni 60 s | — |
+| **!!!** | 3.2–3.3 V | `!!!` in P1 e P3 | rapido | 3 bip ogni 30 s | — |
+| Critico | <3.2 V | — | — | — | Spegnimento automatico |
+
 ### Toggle WiFi/BT
 
 Disattivabili dalla rispettiva pagina display. I parametri `wifi_on_boot` e `bt_on_boot`
@@ -396,7 +409,7 @@ determinano se si riattivano automaticamente dopo un reboot.
 
 ## 13. API esterne *(v1.3)* <a name="api-esterne"></a>
 
-> *Funzionalità non disponibile in `coreink_lite` (v1.2.8). Disponibile in v1.3.*
+> *Funzionalità non disponibile in `coreink_lite` (v1.2.9). Disponibile in v1.3.*
 
 ### OpenWeatherMap (previsioni meteo)
 

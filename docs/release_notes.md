@@ -2,6 +2,28 @@
 
 ---
 
+## v1.2.9 — Fix post-campo GPS→ENV + allarme batteria critica (2026-05-20)
+
+Fix sul comportamento dopo commutazione porta GPS→ENV e miglioramento allarme batteria.
+
+**Build**: `coreink_lite` — Flash 84.0% · RAM 16.1%
+
+### Fix
+
+| ID | Problema | Soluzione |
+|----|----------|-----------|
+| BUG-13 | Dopo commuta GPS→ENV la posizione tornava al locatore NVS invece di usare l'ultimo fix GPS | Aggiunte variabili sticky `lastGpsLat/Lon/PosValid`; aggiornate in `readGps()`; usate come fallback in `sendWeatherPacket()` e `sendPositionPacket()` |
+| BUG-14 | Dopo commuta GPS→ENV il primo pacchetto meteo poteva arrivare fino a 5 min dopo | `lastWeatherTime = 0` in `showPage6Menu()` dopo la commutazione: invio nel ciclo successivo |
+| BUG-15 | Dopo commuta GPS→ENV `temperature/humidity/pressure` restavano a 0 fino alla prima chiamata ordinaria, causando skip del pacchetto | `switchPortMode()` chiama `readSensors()` subito dopo aver impostato `PORT_MODE_ENV` |
+
+### Miglioramenti
+
+| ID | Descrizione | Implementazione |
+|----|-------------|-----------------|
+| ENH-01 | Allarme batteria `!!!` privo di buzzer distinto rispetto a `LOW` | Aggiunto `BUZZ_BAT_CRITICAL`: 3 bip 800 Hz ogni 30 s (vs 1 bip ogni 60 s del `LOW`). Nuova costante `BAT_WARN_THRESHOLD_V 3.3f` in `config.h` |
+
+---
+
 ## v1.2.8 — Bug fixes post-campo + boot splash + WiFi ottimizzato (2026-05-20)
 
 Consolidamento basato sulla prima giornata operativa sul campo (EA5JDG-13, 19/05/2026).

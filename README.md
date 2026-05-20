@@ -25,9 +25,10 @@ L'autore declina ogni responsabilità per un utilizzo non conforme alle normativ
 
 ## Versione
      
-| Versione   | Data       | Note                                                          |
-|------------|------------|---------------------------------------------------------------|
-| **v1.2.8** | 2026-05-20 | **Bug fixes post-campo, boot splash, WiFi ottimizzato**       |
+| Versione   | Data       | Note                                                                    |
+|------------|------------|-------------------------------------------------------------------------|
+| **v1.2.9** | 2026-05-20 | **Fix GPS→ENV sticky position, meteo immediato, allarme batteria critica** |
+| v1.2.8     | 2026-05-20 | Bug fixes post-campo, boot splash, WiFi ottimizzato                     |
 | v1.2.7     | 2026-05-18 | Fix locator 8-char, display 10-char, APRS-IS operativo        |
 | v1.2.6   | 2026-05-17 | Fix WiFiManager, display, intervalli TX configurabili  |
 | v1.2.5   | 2026-05-17 | Build LITE: partizione default.csv senza BLE/logger    |
