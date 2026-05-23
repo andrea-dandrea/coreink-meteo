@@ -283,3 +283,106 @@ wake (cold boot) → init → leggi ENV → aggiorna display → M5.shutdown(600
 | 02:37 | 3.75V | WiFi+ENV | Stabile ~-15mV/10min (env cooling) |
 
 **Autonomia osservata**: ~140 minuti WiFi+GPS continuo (4.1V → 3.75V = 350mV / ~2.5mV/min)
+
+---
+
+## Misure reali da campo — v1.2.9, maggio 2026
+
+> Sessione APRS-IS prolungata (58h, 21–23 maggio 2026), stazione IZ3ARR-13/EA5JDG
+> Valencia (IM99TL), WiFi+ENV attivo, 1 pacchetto ogni 10 min, OTA server attivo.
+
+### Consumo USB misurato
+
+Misure dirette con multimetro in serie sul cavo USB 5V:
+
+| Stato sistema | Corrente USB (5V) | Potenza |
+|---|---|---|
+| Carica batteria (bassa/media carica) | 0.22–0.23 A | ~1.10–1.15 W |
+| Regime normale (batteria piena) | 0.08–0.09 A | ~0.40–0.45 W |
+
+**Note**:
+- Il TP40P57 eroga ~190–200 mA alla LiPo durante la carica (resistenza PROG R45 = 5.1 kΩ → I_charge ≈ 500/5100 ≈ 98 mA, ma taratura effettiva misurata ~200 mA — verificare formula esatta dal datasheet).
+- In regime con batteria piena: il sistema consuma ~0.40–0.45 W totali (ESP32 + WiFi + SHT30 + QMP6988 + display). Il TP40P57 è in trickle/maintenance.
+- La batteria in stato "piena" sul display mostra 4.10–4.11 V (ADC: 4094–4135 mV in telemetria). La soglia di soglia di terminazione del TP40P57 è 4.2 V; il valore letto <4.2 V è normale (batteria in mantenimento/scarica naturale).
+
+### Autonomia su batteria interna (390 mAh)
+
+Da log APRS T#170–T#202 (04:00–09:25 May 23, 2026, modalità WiFi+ENV con GPS off):
+
+| Parametro | Valore |
+|---|---|
+| Durata periodo su sola batteria | ~5.4 h |
+| Vbat inizio | 4116 mV (T#170, 03:55) |
+| Vbat fine | 3694 mV (T#202, 09:20) |
+| Drain totale | 422 mV |
+| Drain medio | ~78 mV/h (~1.3 mV/min) |
+| Autonomia stimata a scarica completa (3.2V) | ~17–18 h da 4.1V |
+
+> **Nota**: l'autonomia reale era ~17–18h perché la batteria era stata ricaricata
+> durante la notte dal PB#2 fino a ~4.1V, quindi il ciclo 04:00–09:25 rappresenta
+> solo una parte della scarica dal top.
+
+**Correzione rispetto ai dati v1.2.6** (sezione precedente):
+I valori "15–18 mA" nella tabella v1.2.6 erano sottostimati di ~5x per errore
+nella formula. Il consumo reale stimato dalla batteria è ~70–80 mA @ 3.7V,
+equivalente a ~0.40–0.45 W, coerente con le misure USB dirette.
+
+### Tempo di ricarica
+
+Da log APRS T#145–T#156 (23:50–01:45 May 22→23, 2026):
+
+| Parametro | Valore |
+|---|---|
+| Vbat inizio carica | 3835 mV (T#145) |
+| Vbat fine carica (plateau) | ~4135 mV |
+| Durata ricarica | ~1h45m–2h |
+| ΔV | ~300 mV |
+| Corrente di carica stimata | ~190–200 mA |
+
+Per una ricarica da ~3.6V a 4.1V completa: **~2.5 h** stimato.
+
+### Hot-swap USB
+
+Il dispositivo **sopravvive a una disconnessione breve del cavo USB** senza
+riavviarsi. La batteria interna eroga corrente durante il gap; POWER_HOLD_PIN è
+mantenuto HIGH dal firmware → il sistema non si spegne.
+
+Osservato nel log T#202→T#203: Vbat salta da 3694→3803 mV (riconnessione USB),
+ma nessun riavvio (il contatore T# continua in sequenza).
+
+### Timeline annotata — sessione 21–23 maggio 2026
+
+| Ora | T# | Vbat (mV) | Evento |
+|-----|-----|-----------|--------|
+| ~20:00 May 21 | T#001 | — | Boot sessione A (dati non inclusi nel log analizzato) |
+| ~23:35 May 21 | T#001 B | — | Boot sessione B (log analizzato) |
+| ~20:00 May 22 | T#123 | 4108 | PB#1 collegato (batteria quasi piena, Chg=1) |
+| ~21:30 May 22 | T#132 | 4061 | PB#1 esaurito → Vbat inizia a scendere |
+| ~23:45 May 22 | T#145 | 3835 | Batteria in scarica da ~2h20m |
+| ~23:55 May 22 | T#146 | 3931 | **PB#2 collegato** (salto +96 mV in 10 min → carica) |
+| ~01:15 May 23 | T#155 | 4117 | Batteria quasi piena |
+| ~01:45 May 23 | T#158 | 4135 | Plateau di carica |
+| ~04:00 May 23 | T#170 | 4116 | **PB#2 esaurito** → Vbat inizia a scendere |
+| ~09:25 May 23 | T#202 | 3694 | Fine batteria interna (5.4h di scarica) |
+| ~09:25 May 23 | T#203 | 3803 | **Trasformatore collegato** (salto +109 mV → ricarica) |
+
+### Proiezione v1.3 con deep sleep (M5.shutdown)
+
+Se il ciclo di 10 min fosse gestito con `M5.shutdown(600)` invece di WiFi+modem sleep:
+
+| Componente | Corrente attiva | Corrente sleep |
+|---|---|---|
+| ESP32 | ~80 mA | ~50 µA |
+| WiFi modem | ~0 mA (off) | — |
+| SHT30+QMP6988 | ~2 mA | <10 µA |
+| Display (EPD) | — (no refresh ogni ciclo) | — |
+| BM8563 RTC | — | ~1.2 µA |
+
+- Tempo attivo per ciclo 10 min: ~20–30 s (boot + lettura ENV + invio APRS)
+- Duty cycle attivo: ~25–30 s / 600 s ≈ 4–5%
+- **Corrente media**: 80 mA × 5% + 0.1 mA × 95% ≈ **4.1 mA**
+- **Autonomia stimata (390 mAh)**: 390 / 4.1 ≈ **~95 h** (~4 giorni) vs ~17–18h attuali
+
+> Guadagno realistico: **5–6x** (considerando overhead di boot e inefficienze).
+> Il WiFi connection time domina il "tempo attivo per ciclo" — pre-connessione WiFi
+> ottimizzata (fast connect con BSSID fisso) è fondamentale per massimizzare il risparmio.

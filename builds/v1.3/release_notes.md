@@ -1,182 +1,106 @@
-# Release Notes - CoreInk Meteo
+# Release Notes — v1.3.0
+
+**Data**: 2026-05-23  
+**Build**: `coreink_lite_m5u` — Flash 98.6% (1,292,037 / 1,310,720) · RAM 17.6%  
+**Libreria display**: M5Unified v0.2.15 (port da M5Core-Ink v1.0.0)  
+**Partizione**: default.csv (1.25 MB app)
 
 ---
 
-## v1.3a — Ottimizzazione flash (2026-05-17)
+## Port a M5Unified
 
-Build ottimizzato per ridurre l'occupazione flash e garantire margine OTA sulla partizione `min_spiffs` (1.875 MB) attualmente sul dispositivo.
+| Aspetto | Prima (v1.2.9) | Dopo (v1.3.0) |
+|---------|----------------|---------------|
+| Libreria | M5Core-Ink v1.0.0 (deprecata) | M5Unified v0.2.15 |
+| Dimensione bin | 1,101,193 B (84%) | 1,292,037 B (98.6%) |
+| Boot | ~1.5 s | ~2.5 s (init M5Unified più pesante) |
+| API display | Ink_Sprite nativo | Compat shim `m5unified_compat.h` |
 
-### Modifiche rispetto a v1.3
+### Shim di compatibilità (`include/m5unified_compat.h`)
 
-| Modifica | Effetto |
-|----------|---------|
-| `CORE_DEBUG_LEVEL=0` (era 1) | Eliminazione stringhe log ESP-IDF residue |
-| `-ffunction-sections -fdata-sections` + gc-sections | Linker rimuove codice morto non raggiungibile |
-| `board_build.f_flash = 80000000L` | Flash a 80 MHz (velocità lettura) |
-| Rimosso `WiFiMulti` | Libreria ridondante (WiFiManager gestisce già tutto); fallback sequenziale su reti config.h |
-| Fix QMP6988 cold boot | Retry init ×3 con delay crescente + doppio warmup read |
-
-### Dimensioni build
-
-| Metrica | v1.3 | v1.3a | Differenza |
-|---------|------|-------|------------|
-| Flash (byte) | 1.942.458 (98.4% di 1.938 MB custom) | 1.889.833 (93.0% di 1.938 MB custom) | **−52.625 byte** |
-| Flash vs min_spiffs (1.966.080) | 98.8% | **96.1%** — margine 76 KB | +3.9% margine |
-| RAM | 20.4% | 20.4% | invariata |
-
-### Compatibilità OTA
-
-- ✅ Entra nella partizione `min_spiffs` (app = 1.875 MB = 1.966.080 byte)
-- ✅ Entra nella partizione `coreink_partitions.csv` custom (app = 1.938 MB)
-- ✅ Funzionalità identiche a v1.3 (nessuna rimozione feature)
-- ✅ Fix aggiuntivo: sensore pressione QMP6988 ora risponde al cold boot
-
-### File binari
-
-| File | Dimensione | Note |
-|------|-----------|------|
-| `firmware_coreink_v1.3.bin` | 1.942.458 byte | Build originale v1.3 (DEBUG_LEVEL=1, con WiFiMulti) |
-| `firmware_coreink_v1.3a.bin` | 1.889.833 byte | **Build ottimizzato** (DEBUG_LEVEL=0, gc-sections, senza WiFiMulti, fix QMP6988) |
-| `bootloader_coreink_v1.3.bin` | ~17 KB | Bootloader ESP32 (condiviso) |
-| `partitions_coreink_v1.3.bin` | ~3 KB | Tabella partizioni custom (condivisa, non serve per OTA) |
-
-### Quale flashare via OTA?
-
-**Usare `firmware_coreink_v1.3a.bin`** — identico funzionalmente, più piccolo, con fix pressione.
+- `Ink_Sprite` → sottoclasse `M5Canvas` con `creatSprite()`, `pushSprite()`, `clear()`
+- `#define M5Ink Display`
+- Mapping pulsanti: BtnUP=BtnA(GPIO37), BtnMID=BtnB(GPIO38), BtnDOWN=BtnC(GPIO39)
+- Setup e-ink: `epd_mode_t::epd_fast`, `setColorDepth(1)`, sfondo bianco, testo nero
 
 ---
 
-## v1.3 — Moduli avanzati (2026-05-17)
+## Nuove funzionalità
 
-Aggiunta di sei nuovi moduli: buzzer, LED status, data logger, parser GPS esteso, calcoli astronomici, BLE OTA indipendente.
+### OpenWeatherMap (OWM)
 
-### Nuovi moduli
+| Feature | Dettaglio |
+|---------|-----------|
+| Modulo `owm.h` / `owm.cpp` | Client HTTP per API OWM (free tier) |
+| Current Weather | Temp, umidità, pressione, vento, nubi, pioggia 3h |
+| Forecast 5-day/3h | 3 slot oggi (+3h, +6h, +9h) + 2 domani (mattina, pomeriggio) |
+| Configurazione | Campo API Key nel form web `/config` |
+| Intervallo | 30 min default, min 5 / max 180 (protezione rate-limit) |
+| Prima fetch | Immediata dopo configurazione key (non aspetta intervallo) |
+| Pagina 9 | Dati meteo OWM attuali + uptime |
+| Pagina 10 | Previsioni (3 oggi + 2 domani) con temp range e descrizione |
 
-| Modulo | Descrizione |
-|--------|-------------|
-| `buzzer.h/cpp` | 10 eventi sonori, 6 melodie di boot, PWM canale 0, BUZZER_PIN=2 |
-| `led_status.h/cpp` | 4 stati LED (SLOW/SOLID/FAST/OFF) + flash TX, GPIO10 |
-| `data_logger.h/cpp` | Ring buffer LittleFS, LogRecord 30 byte, CSV via WebServer `/data` |
-| `gps_extra.h/cpp` | Parser custom GSV (SNR/elevazione/azimuth), GPS + BeiDou + GLONASS, GGA, GSA |
-| `astro.h/cpp` | Algoritmo solare NOAA (alba/tramonto offline), fase lunare (ciclo sinodale) |
-| `ble_ota.h/cpp` | BLE OTA indipendente da `BLE_ENABLED` (fix bug v1.2) |
+### GPS Extra
 
-### Nuove funzionalità
-
-- 9 pagine display (SU/GIU navigazione, EXT = cambio porta ENV/GPS)
-- Runtime port switching ENV III ↔ GPS (hot-swap, salvato in NVS)
-- WiFiManager esteso: tutti i parametri configurabili (callsign, passcode, locator, simbolo APRS, status, volume buzzer, melodia boot)
-- Simbolo APRS configurabile a runtime (rtSymbolTable/rtSymbolCode salvati in NVS)
-- Guard `canTx`: nessun TX se callsign == "NOCALL" o passcode == "-1"
-- Coordinate alternanti ogni refresh display (Maidenhead ↔ lat/lon decimale)
-- APRS Status packet ogni 30 minuti
-- WiFi auto-reconnect ogni 60 secondi
-- Batteria: media mobile su N campioni (fix rumore ADC, bug v1.2)
-- Watchdog 30s, GPIO12 POWER_HOLD refresh ogni loop
-- SmartBeaconing per modo GPS
-
-### Bugfix
-
-- BLE OTA ora sempre inizializzato indipendentemente da `BLE_ENABLED`
-- Lettura batteria stabilizzata con media mobile
-
-### Note di build (CoreInk)
-
-- Flash: 98.8% (partizione `coreink_partitions.csv` — app 1.938 MB, LittleFS 64 KB)
-- RAM: 20.4%
-- LittleFS data logger: ~64 KB disponibili, ~2.100 record da 30 byte
-- `CORE_DEBUG_LEVEL` ridotto da 3 a 1 per risparmiare flash
-- **Nota OTA**: la partition table sul dispositivo resta `min_spiffs` fino al primo flash USB completo.
-  Il firmware funziona correttamente su entrambi gli schemi (entra in entrambe le partizioni app).
-
-### Stato build
-
-| Board | Stato |
-|-------|-------|
-| coreink | SUCCESS |
-| stickcplus2 | NON COMPILATO |
-
-### File binari
-
-| File | Dimensione | Note |
-|------|-----------|------|
-| firmware_coreink_v1.3.bin | ~1.9 MB | Firmware applicazione CoreInk |
-| bootloader_coreink_v1.3.bin | ~17 KB | Bootloader ESP32 |
-| partitions_coreink_v1.3.bin | ~3 KB | Tabella partizioni `coreink_partitions.csv` (app 1.938 MB, LittleFS 64 KB) |
+| Feature | Dettaglio |
+|---------|-----------|
+| Parser NMEA esteso | GSV multi-costellazione (GPS, GLONASS, BeiDou, Galileo) |
+| Dati aggiuntivi | HDOP, PDOP, altitudine, fix quality, sats in view/tracked |
+| Pagina GPS | Informazioni dettagliate su fix, costellazioni, DOP |
 
 ---
 
-## v1.2 — Fix NVS e versione FW (2026-05-17)
+## Bug fix
 
-Correzione caricamento parametri da NVS e miglioramenti display.
-
-### Nuove funzionalità
-
-- Versione firmware (`v1.2`) mostrata in alto a destra sul display
-- Stringa di avvio seriale con versione dinamica da `FW_VERSION`
-
-### Bugfix
-
-- Fix callsign/passcode/locator: ora caricati da NVS all'avvio (fallback a config.h)
-- Fix WiFiManager: le variabili runtime vengono aggiornate subito dopo il salvataggio NVS
-- Fix WiFi credentials: `connectWiFi()` prova prima le credenziali salvate, poi fallback a config.h
-- Fix joystick: aggiunto debounce 200ms + BtnEXT/BtnPWR come alternative per conferma
-
-### Bug noti (risolti in v1.3)
-
-- Lettura batteria fluttuante (singolo campione ADC)
-- BLE OTA non visibile: blocco annidato dentro `BLE_ENABLED=0`, mai inizializzato
+| ID | Problema | Soluzione |
+|----|----------|-----------|
+| B5/W3 | `telemetryDefSent = false` causava re-invio definizioni | Rimosso reset spurio |
+| B6 | Skip pacchetto meteo con pressione 0 e altri valori validi | Skip solo se `pressure == 0.0f` |
 
 ---
 
-## v1.1 — OTA Update (2026-05-16)
+## Modifiche UI
 
-Eliminazione della dipendenza dalla porta USB per aggiornamenti firmware.
-
-### Nuove funzionalità
-
-- ArduinoOTA: upload firmware da PlatformIO via WiFi (`pio run -e coreink_ota -t upload`)
-- Web OTA: pagina http://\<IP\>:8080/update per upload .bin da browser
-- BLE OTA: servizio GATT per upload firmware via Bluetooth (nRF Connect / app custom)
-- Ambienti PlatformIO dedicati: `coreink_ota`, `stickcplus2_ota`
-- WiFiManager: portale captive per configurazione WiFi al primo avvio
-
-### Bugfix
-
-- Fix timezone: display mostra ora locale italiana (CET/CEST automatico con ora legale)
-- Fix timestamp APRS: usa `gmtime_r()` per garantire UTC nei pacchetti (suffisso `z`), indipendente dal timezone locale
+| Modifica | Dettaglio |
+|----------|-----------|
+| Status APRS default | `CoreInk-Meteo v1.3.0 by IZ3ARR` (rimosso `EA5JDG/`) |
+| Titoli uniformati | `Temp:`, `Umid:`, `Press:` in tutte le pagine |
+| Schermo 9 (OWM) | Temp, Umid, Press, Cond, Vento (range), Nubi, Pioggia 3h, Agg |
+| Schermo 10 (Previsioni) | 3 slot oggi + 2 slot domani, formato 2 righe per slot |
+| Schermo Info eliminato | Ex-schermo 9 rimosso; uptime spostato in pagina OWM |
+| Vento OWM | Solo range velocità (rimosso gradi direzione — char non supportato) |
+| NUM_PAGES | 10 (era 9 in v1.2.9) |
 
 ---
 
-## v1.0 — Stazione meteo completa (2026-05-05)
+## Dimensioni
 
-Prima versione stabile con tutte le funzionalità base operative.
-
-### Funzionalità
-
-- Lettura sensore ENV III (SHT30 + QMP6988): temperatura, umidità, pressione
-- Pubblicazione pacchetti APRS weather report via APRS-IS
-- WiFi Multi (più reti memorizzate, connessione automatica)
-- 3 profili stazione selezionabili al boot (joystick)
-- Simbolo APRS configurabile per profilo
-- Posizione in formato Maidenhead
-- GPS opzionale (AT6558) con sovrascrittura coordinate
-- SmartBeaconing (intervallo adattivo basato su velocità/direzione GPS)
-- Display e-ink: dati sensore, IP, nominativo, stato GPS, ultimo TX
-- LED verde lampeggio conferma invio pacchetto
-- Telemetria APRS (batteria, RSSI, uptime, satelliti GPS)
-- Separazione pacchetto posizione e pacchetto meteo
-- Salvataggio configurazione in NVS (persistente tra riavvii)
-- Sincronizzazione orario NTP
-- Supporto dual-board: CoreInk + StickCPlus2
+| Componente | Byte | Note |
+|------------|------|------|
+| Baseline v1.2.9 | 1,101,193 | 84.0% flash |
+| M5Unified solo | 1,138,557 | +37 KB per la libreria |
+| v1.3.0 completa | 1,292,037 | +191 KB totali (OWM, GPS_EXTRA, forecast) |
 
 ---
 
-## v0.1 — Prototipo iniziale (2026-05-01)
+## Dipendenze
 
-### Funzionalità
+| Libreria | Versione |
+|----------|----------|
+| M5Unified | 0.2.15 |
+| M5Unit-ENV | 1.0.1 |
+| TinyGPSPlus | 1.1.0 |
+| WiFiManager | 2.0.17 |
+| ArduinoOTA | 2.0.0 |
+| HTTPClient | 2.0.0 |
+| ESP32 BLE Arduino | 2.0.0 |
+| Espressif32 platform | 7.0.0 |
+| Arduino ESP32 framework | 3.20017 |
 
-- Lettura sensore ENV III base
-- Invio pacchetto APRS weather report
-- Display e-ink con dati
-- Connessione WiFi singola
+---
+
+## Note
+
+- Flash al 98.6%: margine residuo ~18 KB. Ulteriori feature richiedono partizione custom (`coreink_partitions.csv`, 1.94 MB app) che richiede flash USB.
+- Boot leggermente più lento (~1 s in più) per init M5Unified — non critico.
+- BLE framework presente nell'ESP-IDF ma non rimovibile via `lib_ignore` (fa parte del core).

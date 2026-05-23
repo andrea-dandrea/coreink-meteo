@@ -9,7 +9,11 @@
 #if defined(BOARD_STICKCPLUS2)
   #include <M5StickCPlus2.h>
 #elif defined(BOARD_COREINK)
-  #include <M5CoreInk.h>
+  #if defined(USE_M5UNIFIED)
+    #include "m5unified_compat.h"
+  #else
+    #include <M5CoreInk.h>
+  #endif
 #else
   #error "Definire BOARD_COREINK o BOARD_STICKCPLUS2 nei build_flags"
 #endif
@@ -48,6 +52,7 @@
 #include "gps_extra.h"
 #endif
 #include "astro.h"
+#include "owm.h"
 
 #if OTA_ENABLED
 #include <ArduinoOTA.h>
@@ -126,6 +131,8 @@ float temperature = 0.0;
 float humidity = 0.0;
 float pressure = 0.0;
 float batVoltage = 0.0;
+float stationLat = 0.0f;   // Coordinate stazione (da locator o GPS) — usate da OWM
+float stationLon = 0.0f;
 float batSamples[BAT_ADC_SAMPLES];
 int batSampleIdx = 0;
 bool batSamplesReady = false;
@@ -235,6 +242,9 @@ void setup() {
 
     M5.begin();
     Serial.begin(115200);
+#if defined(USE_M5UNIFIED)
+    m5unified_setup_eink();  // E-ink fast/partial refresh mode
+#endif
 #elif defined(BOARD_STICKCPLUS2)
     auto cfg = M5.config();
     StickCP2.begin(cfg);
@@ -440,6 +450,10 @@ void setup() {
     logger_init();
 #endif
 
+    // OpenWeatherMap: init + coordinate stazione da locator
+    maidenhead_to_latlon(rtLocator, stationLat, stationLon);
+    owm_init();
+
     // Prima lettura
     if (portMode == PORT_MODE_ENV) readSensors();
     batVoltage = readBattery();
@@ -551,6 +565,9 @@ void loop() {
     }
 #endif
 
+    // OpenWeatherMap: aggiorna dati se scaduto intervallo
+    owm_update(now);
+
     // Display
     if (now - lastDisplayTime >= rtDisplayUpdateMs) {
         if (portMode == PORT_MODE_ENV) readSensors();
@@ -641,7 +658,11 @@ void loop() {
         if (batVoltage < BAT_CRITICAL_THRESHOLD_V) {
             // Batteria critica: spegni il dispositivo (BM8563 de-asserta PS_EN)
             // TODO v1.3: mostrare schermata "Batteria critica" prima dello spegnimento
+#if defined(USE_M5UNIFIED)
+            M5.Power.powerOff();
+#else
             M5.shutdown();
+#endif
         } else if (batVoltage < BAT_WARN_THRESHOLD_V) {
             // Batteria !!!: 3.2-3.3 V — buzzer urgente ogni 30s
             led_set_state(LED_FAST);
@@ -707,8 +728,8 @@ void wifi_update() {
                     led_set_state(LED_SLOW);
                 buzzer_play_event(BUZZ_WIFI_OK);
                 syncTime();  // Risincronizza NTP dopo riconnessione
-                // Definizioni telemetria dopo riconnessione (se non già inviate)
-                telemetryDefSent = false;
+                // B5/W3 fix: non forzare re-invio PARM/UNIT/EQNS su riconnessione.
+                // Il timer 2h (TELEMETRY_DEFINITION_INTERVAL_MS) gestisce il refresh periodico.
             } else if (now - wifiRetryTime > WIFI_TIMEOUT_MS) {
                 WiFi.disconnect();
                 wifiState = (wifiStatePrev == WIFI_ST_CONNECTED ||
@@ -1382,11 +1403,11 @@ void drawPage(int page) {
     switch (page) {
 
     case 0: { // === Principale: meteo + posizione ===
-        snprintf(buf, sizeof(buf), "T: %.1f C", temperature);
+        snprintf(buf, sizeof(buf), "Temp: %.1f C", temperature);
         mainSprite.drawString(5, 20, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "H: %.1f %%", humidity);
+        snprintf(buf, sizeof(buf), "Umid: %.1f %%", humidity);
         mainSprite.drawString(5, 38, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "P: %.1f mbar", pressure);  // BUG-05
+        snprintf(buf, sizeof(buf), "Press: %.1f mbar", pressure);  // BUG-05
         mainSprite.drawString(5, 56, buf, &fonts::AsciiFont8x16);
         {   // BUG-07: warning visivo batteria
             const char* bw = batVoltage < BAT_WARN_THRESHOLD_V ? " !!!" : (batVoltage < BAT_LOW_THRESHOLD_V ? " LOW" : "");
@@ -1508,19 +1529,14 @@ void drawPage(int page) {
             snprintf(buf, sizeof(buf), "Vbat: %.2fV%s", batVoltage, bw2);
         }
         mainSprite.drawString(5, 42, buf, &fonts::AsciiFont8x16);
-        {   // BUG-09: uptime hh:mm
-            int upM = (millis() - uptimeStart) / 60000;
-            snprintf(buf, sizeof(buf), "Uptime: %dh %dm", upM / 60, upM % 60);
-        }
-        mainSprite.drawString(5, 62, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "WiFi: %s", WiFi.status() == WL_CONNECTED ? WiFi.SSID().c_str() : "no conn");
-        mainSprite.drawString(5, 82, buf, &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 62, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "IP: %s", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "---");
-        mainSprite.drawString(5, 100, buf, &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 80, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "RSSI: %d dBm", WiFi.RSSI());
-        mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 98, buf, &fonts::AsciiFont8x16);
         snprintf(buf, sizeof(buf), "TX: %s %s", lastTxTime, lastTxOk ? "OK" : "FAIL");  // BUG-09
-        mainSprite.drawString(5, 136, buf, &fonts::AsciiFont8x16);
+        mainSprite.drawString(5, 116, buf, &fonts::AsciiFont8x16);
 #endif
         break;
     }
@@ -1649,31 +1665,81 @@ void drawPage(int page) {
         break;
     }
 
-    case 8: { // === Data Logger ===
-#if DATA_LOGGER_ENABLED
-        mainSprite.drawString(5, 20, "=== Recorder ===", &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Stato: %s", logger_is_enabled() ? "REC" : "STOP");
-        mainSprite.drawString(5, 40, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Record: %u / %u", logger_get_count(), logger_get_capacity());
-        mainSprite.drawString(5, 58, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Uso: %.1f %%", logger_get_usage_percent());
-        mainSprite.drawString(5, 76, buf, &fonts::AsciiFont8x16);
-        snprintf(buf, sizeof(buf), "Intervallo: %us", logger_get_interval());
-        mainSprite.drawString(5, 94, buf, &fonts::AsciiFont8x16);
-#if OTA_ENABLED
-        if (wifiEnabled && WiFi.status() == WL_CONNECTED) {
-            snprintf(buf, sizeof(buf), "CSV: :%d/data", OTA_WEB_PORT);
-            mainSprite.drawString(5, 120, buf, &fonts::AsciiFont8x16);
+    case 8: { // === OpenWeatherMap ===
+        mainSprite.drawString(5, 20, "=== Meteo OWM ===", &fonts::AsciiFont8x16);
+        if (!owm_is_configured()) {
+            mainSprite.drawString(5, 60, "API key non config.", &fonts::AsciiFont8x16);
+            mainSprite.drawString(5, 80, "Usa /config per", &fonts::AsciiFont8x16);
+            mainSprite.drawString(5, 98, "inserire owm_key", &fonts::AsciiFont8x16);
+        } else {
+            const OwmData& owm = owm_get_data();
+            if (!owm.valid) {
+                mainSprite.drawString(5, 60, "In attesa dati...", &fonts::AsciiFont8x16);
+            } else {
+                snprintf(buf, sizeof(buf), "Temp: %.1f C (%.1f)", owm.temp, owm.feels_like);
+                mainSprite.drawString(5, 38, buf, &fonts::AsciiFont8x16);
+                snprintf(buf, sizeof(buf), "Umid: %.0f %%", owm.humidity);
+                mainSprite.drawString(5, 54, buf, &fonts::AsciiFont8x16);
+                snprintf(buf, sizeof(buf), "Press: %.0f hPa", owm.pressure);
+                mainSprite.drawString(5, 70, buf, &fonts::AsciiFont8x16);
+                snprintf(buf, sizeof(buf), "Cond: %s", owm.description);
+                mainSprite.drawString(5, 86, buf, &fonts::AsciiFont8x16);
+                snprintf(buf, sizeof(buf), "Vento: %.1f-%.1f m/s", owm.wind_speed, owm.wind_gust > 0 ? owm.wind_gust : owm.wind_speed);
+                mainSprite.drawString(5, 102, buf, &fonts::AsciiFont8x16);
+                snprintf(buf, sizeof(buf), "Nubi: %.0f %%", owm.clouds);
+                mainSprite.drawString(5, 118, buf, &fonts::AsciiFont8x16);
+                snprintf(buf, sizeof(buf), "Pioggia 3h: %.1f mm", owm.rain_3h);
+                mainSprite.drawString(5, 134, buf, &fonts::AsciiFont8x16);
+                int agoMin = (millis() - owm_last_success()) / 60000;
+                snprintf(buf, sizeof(buf), "Agg: %d min fa", agoMin);
+                mainSprite.drawString(5, 150, buf, &fonts::AsciiFont8x16);
+            }
         }
-#endif
-#else
-        mainSprite.drawString(5, 20, "=== Info ===", &fonts::AsciiFont8x16);
-#endif
-        int upMin = (millis() - uptimeStart) / 60000;
-        snprintf(buf, sizeof(buf), "Uptime: %dh %dm", upMin / 60, upMin % 60);
-        mainSprite.drawString(5, 150, buf, &fonts::AsciiFont8x16);
+        {
+            int upMin = (millis() - uptimeStart) / 60000;
+            snprintf(buf, sizeof(buf), "Up: %dh %dm", upMin / 60, upMin % 60);
+            mainSprite.drawString(5, 168, buf, &fonts::AsciiFont8x16);
+        }
         break;
     }
+
+    case 9: { // === Previsioni OWM ===
+        mainSprite.drawString(5, 18, "-- Previsioni --", &fonts::AsciiFont8x16);
+        if (!owm_is_configured()) {
+            mainSprite.drawString(5, 60, "API key non config.", &fonts::AsciiFont8x16);
+        } else if (!owm_forecast_valid()) {
+            mainSprite.drawString(5, 60, "In attesa dati...", &fonts::AsciiFont8x16);
+        } else {
+            const OwmForecastSlot* fc = owm_get_forecast();
+            int y = 34;
+            // Oggi +3h, +6h, +9h
+            for (int i = 0; i < 3; i++) {
+                if (fc[i].valid) {
+                    snprintf(buf, sizeof(buf), "Oggi %02d:00", fc[i].hour);
+                    mainSprite.drawString(5, y, buf, &fonts::AsciiFont8x16);
+                    y += 16;
+                    snprintf(buf, sizeof(buf), " %.0f-%.0fC %s", fc[i].temp_min, fc[i].temp_max, fc[i].description);
+                    buf[25] = '\0';
+                    mainSprite.drawString(5, y, buf, &fonts::AsciiFont8x16);
+                    y += 16;
+                }
+            }
+            // Domani matt e pom
+            for (int i = 3; i < 5; i++) {
+                if (fc[i].valid) {
+                    snprintf(buf, sizeof(buf), "Dom. %s", i == 3 ? "mattina" : "pomeriggio");
+                    mainSprite.drawString(5, y, buf, &fonts::AsciiFont8x16);
+                    y += 16;
+                    snprintf(buf, sizeof(buf), " %.0f-%.0fC %s", fc[i].temp_min, fc[i].temp_max, fc[i].description);
+                    buf[25] = '\0';
+                    mainSprite.drawString(5, y, buf, &fonts::AsciiFont8x16);
+                    y += 16;
+                }
+            }
+        }
+        break;
+    }
+
     } // switch
 
     mainSprite.pushSprite();
@@ -1739,8 +1805,9 @@ void drawPage(int page) {
 void sendWeatherPacket() {
     // Skip se ENV selezionato ma sensore scollegato o non inizializzato
     if (portMode == PORT_MODE_GPS) return;  // Dati ENV non validi in modalita GPS
-    if (portMode == PORT_MODE_ENV && pressure == 0.0f && temperature == 0.0f) {
-        Serial.println("[APRS-WX] Skip: ENV scollegato o non inizializzato");
+    // B6 fix: skip se pressione=0 (QMP6988 scollegato/errore) — dato meteo APRS non valido
+    if (portMode == PORT_MODE_ENV && pressure == 0.0f) {
+        Serial.println("[APRS-WX] Skip: pressione=0, ENV scollegato o in errore");
         return;
     }
     if (WiFi.status() != WL_CONNECTED) {
@@ -2122,6 +2189,9 @@ a{display:block;margin-top:8px;color:#0078d4;font-size:13px}
 <div><label>Status (minuti)</label><input name="st_intv" value="%ST%" maxlength="4"></div>
 </div>
 
+<h3>OpenWeatherMap <span class="hint">(gratis: openweathermap.org/appid)</span></h3>
+<label>API Key <span class="hint">(32 char hex, lascia vuoto per disabilitare)</span></label><input name="owm_key" value="%OWM%" maxlength="48">
+
 <button type="submit">&#128190; Salva configurazione</button>
 </form>
 <a href="/update">&#8593; Aggiorna firmware (OTA)</a>
@@ -2203,6 +2273,7 @@ void setupOTA() {
         html.replace("%DREF%", String((int)(rtDisplayUpdateMs / 1000)));
         html.replace("%WX%",   String((int)(rtWeatherIntervalMs / 60000)));
         html.replace("%ST%",   String((int)(rtStatusIntervalMs / 60000)));
+        html.replace("%OWM%",  nvs_load_string(NVS_KEY_OWM_KEY, ""));
         otaServer.send(200, "text/html; charset=utf-8", html);
     });
     otaServer.on("/config", HTTP_POST, []() {
@@ -2275,6 +2346,14 @@ void setupOTA() {
         if (otaServer.hasArg("disp_ref")) { int v = otaServer.arg("disp_ref").toInt(); if (v>=10&&v<=300){ nvs_save_int(NVS_KEY_DISPLAY_REFRESH,v); rtDisplayUpdateMs=v*1000UL; } }
         if (otaServer.hasArg("wx_intv"))  { int v = otaServer.arg("wx_intv").toInt();  if (v>=1&&v<=60)  { nvs_save_int(NVS_KEY_WEATHER_INTERVAL,v); rtWeatherIntervalMs=v*60000UL; } }
         if (otaServer.hasArg("st_intv"))  { int v = otaServer.arg("st_intv").toInt();  if (v>=10&&v<=180){ nvs_save_int(NVS_KEY_STATUS_INTERVAL,v); rtStatusIntervalMs=v*60000UL; } }
+        // OWM API key
+        if (otaServer.hasArg("owm_key")) {
+            String v = otaServer.arg("owm_key");
+            v.trim();
+            nvs_save_string(NVS_KEY_OWM_KEY, v.c_str());
+            // Re-init OWM con la nuova key
+            owm_init();
+        }
         Serial.printf("[Config] Salvato profilo %d: call=%s ssid=%d loc=%s sym=%c%c\n",
                       activeProfile, rtCallsign, rtSsidAprs, rtLocator, rtSymbolTable, rtSymbolCode);
         otaServer.send(200, "text/html; charset=utf-8",

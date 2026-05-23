@@ -1,12 +1,12 @@
-# CoreInk-Meteo — Manuale Utente
+# CoreInk-Meteo — Manuale Utente (v1.2.9)
 
 **Versione**: v1.2.9 (coreink_lite)  
+**Valido per**: v1.0 — v1.2.9  
 **Autori**: EA5JDG / IZ3ARR  
 **Hardware**: M5Stack CoreInk + ENV III + GPS/BDS (AT6558)
 
-> **Nota di tracciabilità**: Questo manuale documenta il firmware **v1.2.9**.
-> Nelle versioni future l'interfaccia, le schermate e le funzioni potranno cambiare in modo significativo.
-> Ogni versione del firmware dispone del proprio manuale corrispondente.
+> **Nota di tracciabilità**: Questo manuale è valido fino alla versione **v1.2.9** inclusa.
+> Per versioni successive (v1.3.0+) fare riferimento a `manuale_utente_v1.3.md`.
 
 ---
 

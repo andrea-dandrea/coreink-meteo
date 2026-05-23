@@ -1,6 +1,10 @@
 # WiFi State Machine — CoreInk-Meteo
 
-## Problemi attuali (v1.2.7)
+> **Stato**: documento di design per v1.4+. In v1.3.0 il WiFi usa ancora il modello
+> semplificato (connessione al boot + reconnect periodico). La FSM a 6 stati descritta
+> qui sotto è il target architetturale per la prossima versione.
+
+## Problemi attuali (v1.2.x, parzialmente risolti in v1.3.0)
 
 1. **AP automatico nel setup**: se `connectWiFi()` fallisce al boot, apre subito `startWiFiManager()` (portale captive). Questo è **bloccante** e non ritorna al loop finché non scade il timeout (5 min) o l'utente configura.
 2. **Reconnect nel loop primitivo**: ogni 60s chiama `connectWiFi()` che prova le credenziali salvate, poi le reti hardcoded di config.h (placeholder "RETE_1/2/3"). Se una rete reale si chiama simile, tenta di connettersi con password sbagliate.

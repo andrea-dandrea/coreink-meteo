@@ -27,12 +27,12 @@ L'autore declina ogni responsabilità per un utilizzo non conforme alle normativ
      
 | Versione   | Data       | Note                                                                    |
 |------------|------------|-------------------------------------------------------------------------|
-| **v1.2.9** | 2026-05-20 | **Fix GPS→ENV sticky position, meteo immediato, allarme batteria critica** |
+| **v1.3.0** | 2026-05-23 | **Port M5Unified + OpenWeatherMap + Previsioni meteo** |
+| v1.2.9     | 2026-05-20 | Fix GPS→ENV sticky position, meteo immediato, allarme batteria critica |
 | v1.2.8     | 2026-05-20 | Bug fixes post-campo, boot splash, WiFi ottimizzato                     |
 | v1.2.7     | 2026-05-18 | Fix locator 8-char, display 10-char, APRS-IS operativo        |
 | v1.2.6   | 2026-05-17 | Fix WiFiManager, display, intervalli TX configurabili  |
 | v1.2.5   | 2026-05-17 | Build LITE: partizione default.csv senza BLE/logger    |
-| v1.3     | 2026-05-17 | Moduli avanzati: buzzer, LED, data logger, astro       |
 | v1.2     | 2026-05-17 | Fix NVS, versione FW su display                        |
 | v1.1     | 2026-05-16 | OTA WiFi + BLE (no USB)                                |
 | v1.0     | 2026-05-05 | Stazione meteo completa                                |
@@ -43,6 +43,20 @@ L'autore declina ogni responsabilità per un utilizzo non conforme alle normativ
 - **M5Stack CoreInk** - Microcontrollore ESP32 con display e-ink, 3 pulsanti e LED verde
 - **ENV III Unit** - Sensore con SHT30 (temperatura + umidità) e QMP6988 (pressione barometrica)
 - **Modulo GPS** (opzionale) - Per posizione dinamica e SmartBeaconing
+
+## Librerie principali (v1.3.0)
+
+| Libreria | Versione | Note |
+|----------|----------|------|
+| M5Unified | 0.2.15 | Display, pulsanti, power management |
+| M5Unit-ENV | 1.0.1 | Sensore SHT30 + QMP6988 |
+| TinyGPSPlus | 1.1.0 | Parser NMEA base |
+| WiFiManager | 2.0.17 | Portale captive per config WiFi |
+| HTTPClient | 2.0.0 | Client HTTP per OWM API |
+| Espressif32 | 7.0.0 | Piattaforma ESP32 |
+
+> **OpenWeatherMap**: i dati meteo sono forniti da [OpenWeatherMap](https://openweathermap.org/) (piano Free, max 1000 chiamate/giorno).
+> L'uso dei dati è soggetto ai [Terms of Service](https://openweathermap.org/terms) e alla licenza [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) per i dati meteorologici.
 
 Datasheet, schemi elettrici e pin mapping: [docs/hw_configuration.md](docs/hw_configuration.md)
 
@@ -163,7 +177,9 @@ pio device monitor
 │   ├── data_logger.h           # Data logger su LittleFS (ring buffer CSV)
 │   ├── gps_extra.h             # Parser NMEA esteso (GSV, GGA, GSA multi-costellazione)
 │   ├── led_status.h            # Gestione LED stato (SLOW/SOLID/FAST/OFF)
+│   ├── m5unified_compat.h      # Shim compatibilità M5CoreInk → M5Unified
 │   ├── nvs_config.h            # Configurazione persistente NVS
+│   ├── owm.h                   # Client OpenWeatherMap (current + forecast)
 │   └── smartbeacon.h           # Algoritmo SmartBeaconing
 ├── src/
 │   ├── main.cpp                # Programma principale + OTA WiFi/Web
@@ -177,12 +193,14 @@ pio device monitor
 │   ├── gps_extra.cpp           # Implementazione parser NMEA esteso
 │   ├── led_status.cpp          # Implementazione LED stato
 │   ├── nvs_config.cpp          # Implementazione storage NVS
+│   ├── owm.cpp                 # Implementazione client OpenWeatherMap
 │   └── smartbeacon.cpp         # Implementazione SmartBeaconing
 ├── docs/
 │   ├── release_notes.md        # Changelog cumulativo tutte le versioni
 │   ├── release_procedure.md    # Procedura release (tagging, build, GitHub)
 │   ├── roadmap.md              # Funzionalità pianificate
-│   ├── manuale_utente.md       # Guida utente
+│   ├── manuale_utente_v1.2.9.md # Guida utente (v1.0 — v1.2.9)
+│   ├── manuale_utente_v1.3.md  # Guida utente (v1.3.0+)
 │   ├── build_notes_v1.md       # Note tecniche di build
 │   ├── hw_configuration.md     # Indice hardware: datasheet, schemi, pin mapping
 │   ├── coreink_datasheet.md    # Datasheet M5Stack CoreInk
@@ -194,6 +212,8 @@ pio device monitor
 │   ├── screen_map.md           # Mappa schermate e transizioni
 │   └── HW/                     # Datasheet PDF, schemi elettrici
 └── builds/
+    ├── v1.3/                   # Firmware v1.3.0 (coreink_lite_m5u) + release notes
+    ├── v1.2.9/                 # Release notes
     ├── v1.2.8/                 # Firmware v1.2.8 (coreink_lite) + release notes
     ├── v1.2.7/                 # Firmware v1.2.7 (coreink_lite) + release notes
     ├── v1.2.6/                 # Release notes
@@ -220,11 +240,16 @@ Questo progetto è realizzato nello spirito di condivisione della comunità radi
 
 | Libreria                                                              | Autore            | Licenza                |
 |-----------------------------------------------------------------------|-------------------|------------------------|
-| [M5Core-Ink](https://github.com/m5stack/M5Core-Ink)                   | M5Stack           | MIT                    |
+| [M5Unified](https://github.com/m5stack/M5Unified)                     | M5Stack           | MIT                    |
 | [M5GFX](https://github.com/m5stack/M5GFX)                             | M5Stack           | MIT                    |
-| [M5StickCPlus2](https://github.com/m5stack/M5StickCPlus2)             | M5Stack           | MIT                    |
 | [M5Unit-ENV](https://github.com/m5stack/M5Unit-ENV)                   | M5Stack           | MIT                    |
 | [TinyGPSPlus](https://github.com/mikalhart/TinyGPSPlus)               | Mikal Hart        | GNU LGPL v2.1          |
 | [WiFiManager](https://github.com/tzapu/WiFiManager)                   | tzapu             | MIT                    |
 | [ESP32 Arduino Framework](https://github.com/espressif/arduino-esp32) | Espressif Systems | LGPL v2.1 / Apache 2.0 |
 | [NOAA Solar Calculator](https://gml.noaa.gov/grad/solcalc/)          | U.S. NOAA / ESRL  | Pubblico dominio       |
+
+### Dati meteo
+
+| Servizio | Licenza | Note |
+|----------|---------|------|
+| [OpenWeatherMap](https://openweathermap.org/) | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) | Dati current weather e forecast — piano Free (1000 call/giorno) |

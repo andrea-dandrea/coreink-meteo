@@ -1,4 +1,8 @@
-# Mappa Schermi — CoreInk-Meteo
+# Mappa Schermi — CoreInk-Meteo v1.3.0
+
+> **Stato implementativo**: in v1.3.0 è attivo solo lo stato S3 NAV con navigazione
+> lineare su 10 pagine. Gli stati S0-S2, S4-S8 sono documentati come design target
+> per la v1.4 (WiFi FSM + buzzer feedback).
 
 ## Tutti gli schermi del sistema
 
@@ -178,7 +182,7 @@
 **Display**:
 ```
 ┌──────────────────────────────┐
-│ EA5JDG-13 [WiFi...] v1.3   │
+│ EA5JDG-13 [WiFi...] v1.3.0  │
 │──────────────────────────────│
 │                              │
 │   Connessione WiFi...        │
@@ -217,11 +221,11 @@
 
 **Durata**: indefinita (stato normale di funzionamento)
 
-**Display**: pagina corrente (0-8) con header e contenuto
+**Display**: pagina corrente (0-9, totale 10 pagine) con header e contenuto
 
 ```
 ┌──────────────────────────────┐
-│ EA5JDG-13  [WiFi✓] 3/9 v1.3 │  ← Header con stato WiFi
+│ EA5JDG-13 [WiFi✓] 3/10 v1.3 │  ← Header con stato WiFi
 │──────────────────────────────│
 │                              │
 │   (contenuto pagina)         │
@@ -259,6 +263,21 @@
 | Retry ok | Resta in S3, icona torna a [WiFi✓] |
 | — | Il loop gira sempre, display aggiorna ogni rtDisplayUpdateMs |
 
+### Pagine NAV (v1.3.0)
+
+| # | Contenuto | Note |
+|---|-----------|------|
+| 0 | Sensori ENV: Temp, Umid, Press | Dati locali SHT30 + QMP6988 |
+| 1 | Stato stazione: call, locator, IP, SSID | Info sistema |
+| 2 | GPS: lat/lon, sat, HDOP, velocità | Solo con GPS attivo |
+| 3 | APRS: ultimo TX, stato, contatori | — |
+| 4 | WiFi: RSSI, SSID, IP, stato | — |
+| 5 | Astronomia: alba, tramonto, fase luna | Calcoli NOAA |
+| 6 | Telemetria: batteria, RSSI, uptime, bit | — |
+| 7 | SmartBeacon: velocità, heading, intervallo | Solo con GPS |
+| 8 | **OWM Current**: Temp, Umid, Press, Cond, Vento(range), Nubi, Pioggia 3h | Richiede WiFi + API key |
+| 9 | **OWM Forecast**: 5 slot (3 oggi + 2 domani), 2 righe per slot | Richiede WiFi + API key |
+
 ---
 
 ## [S4] WAITING (nessuna connessione WiFi stabilita)
@@ -269,7 +288,7 @@ In realtà dopo la prima visualizzazione, diventa S3 normale con icona [WiFi✗]
 **Display** (mostrato una volta dopo S2 fallito):
 ```
 ┌──────────────────────────────┐
-│ EA5JDG-13  [WiFi✗] 1/9 v1.3 │
+│ EA5JDG-13 [WiFi✗] 1/10 v1.3 │
 │──────────────────────────────│
 │                              │
 │   WiFi non disponibile      │

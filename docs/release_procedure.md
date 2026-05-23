@@ -8,8 +8,11 @@
 ## FASE 1 — Sviluppo
 
 1. Implementa tutto il previsto per la versione
-2. Aggiorna `FW_VERSION` in `platformio.ini` (es. `"1.2.8"`)
-3. Build: `pio run -e coreink_lite`
+2. Aggiorna `FW_VERSION` in `platformio.ini` (es. `"1.3.0"`)
+3. Build: `pio run -e coreink_lite_m5u`
+
+> **Nota**: da v1.3.0 l'environment di riferimento è `coreink_lite_m5u` (M5Unified).
+> L'env `coreink_lite` (M5Core-Ink legacy) non è più mantenuto.
 
 ## FASE 2 — Verifica sul dispositivo ⚠️
 

@@ -2,6 +2,47 @@
 
 ---
 
+## v1.3.0 — Port M5Unified + OpenWeatherMap + Previsioni (2026-05-23)
+
+Port completo alla libreria M5Unified (v0.2.15) con integrazione dati meteo da OpenWeatherMap (current + forecast 5-day/3h).
+
+**Build**: `coreink_lite_m5u` — Flash 98.6% · RAM 17.6%  
+**Libreria display**: M5Unified v0.2.15 (sostituisce M5Core-Ink v1.0.0 deprecata)
+
+### Port M5Unified
+
+- Shim di compatibilità `m5unified_compat.h`: mappa Ink_Sprite, pulsanti, colori e-ink
+- Verificato su dispositivo: display, pulsanti, refresh veloce — tutto funzionante
+- Incremento dimensione: +37 KB (solo libreria), +191 KB totali con nuove feature
+
+### Nuove funzionalità
+
+| Feature | Dettaglio |
+|---------|-----------|
+| OWM Current Weather | Temp, umidità, pressione, vento (range), nubi, pioggia 3h |
+| OWM Forecast | 3 slot oggi (+3/+6/+9h) + 2 domani (mattina/pomeriggio) |
+| API key via web | Campo nel form `/config` per inserire la key OWM |
+| GPS Extra | Parser NMEA esteso (GSV multi-costellazione, HDOP, PDOP, altitudine) |
+| Pagina 9 | Dati OWM attuali + uptime |
+| Pagina 10 | Previsioni meteo |
+
+### Bug fix
+
+| ID | Soluzione |
+|----|-----------|
+| B5/W3 | Rimosso reset spurio `telemetryDefSent` |
+| B6 | Skip pacchetto solo se `pressure == 0` |
+
+### Modifiche UI
+
+- Status default: `CoreInk-Meteo v1.3.0 by IZ3ARR`
+- Titoli uniformati: `Temp:`, `Umid:`, `Press:` ovunque
+- Rimosso schermo Info (uptime in pagina OWM)
+- Vento: solo range velocità (rimosso simbolo ° non supportato dal font)
+- NUM_PAGES = 10
+
+---
+
 ## v1.2.9 — Fix post-campo GPS→ENV + allarme batteria critica (2026-05-20)
 
 Fix sul comportamento dopo commutazione porta GPS→ENV e miglioramento allarme batteria.

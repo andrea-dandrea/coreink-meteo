@@ -138,7 +138,9 @@ const StationProfile profiles[NUM_PROFILES] = {
 
 // === Display ===
 #define DISPLAY_UPDATE_MS 60000   // Aggiornare il display ogni minuto
+#ifndef NUM_PAGES
 #define NUM_PAGES 9               // Numero totale di pagine display
+#endif
 
 // === Batteria ===
 #define BAT_ADC_SAMPLES 5         // Media mobile su N campioni
@@ -148,7 +150,7 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define BUZZER_DEFAULT_VOLUME 50  // Duty cycle PWM default (0-100)
 
 // === APRS Status ===
-#define APRS_STATUS_DEFAULT "CoreInk-Meteo v" FW_VERSION " by EA5JDG/IZ3ARR"
+#define APRS_STATUS_DEFAULT "CoreInk-Meteo v" FW_VERSION " by IZ3ARR"
 #define APRS_STATUS_INTERVAL_MS 3600000  // Status ogni 60 minuti (default)
 
 // === Data Logger ===

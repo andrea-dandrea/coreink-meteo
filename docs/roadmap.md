@@ -12,94 +12,79 @@
 | v1.2.6 | Fix WiFiManager (watchdog, salvataggio, timeout), display, LED, intervalli TX | 2026-05-17 |
 | v1.2.7 | Fix locator Maidenhead 8-char, display 10-char, prima APRS-IS operativa | 2026-05-18 |
 | v1.2.8 | Bug fixes post-campo (BUG-01..12), boot splash, WiFi round-robin e timeout 8 s | 2026-05-20 |
+| v1.2.9 | Fix GPS→ENV sticky, meteo immediato, allarme batteria critica | 2026-05-20 |
+| v1.3.0 | Port M5Unified, OWM current+forecast, web config /config, 10 pagine display | 2026-05-23 |
 
 ---
 
-## v1.3 — In sviluppo (telemetria avanzata + WiFi FSM + web config)
+## v1.3.0 — Rilasciata (2026-05-23)
+
+### Completato in questa versione
+
+- [x] **Port a M5Unified 0.2.15** — sostituisce M5Core-Ink 1.0.0 deprecata
+- [x] Shim di compatibilità `m5unified_compat.h` per transizione graduale
+- [x] **OpenWeatherMap current weather** — temp, feels_like, humidity, pressure, wind, clouds, rain_3h
+- [x] **OWM Forecast 5 slot** — +3h, +6h, +9h, domani mattina, domani pomeriggio
+- [x] Parsing JSON manuale (senza ArduinoJson, risparmio flash)
+- [x] **Pagina 9 OWM** — dati meteo correnti: Temp, Umid, Press, Cond, Vento(range), Nubi, Pioggia 3h
+- [x] **Pagina 10 Forecast** — previsioni 2 righe per slot (titolo + min-max + descrizione)
+- [x] **Web server `/config`** — form per chiave OWM API, salvata in NVS
+- [x] `NUM_PAGES=10` via build flag
+- [x] Build env `coreink_lite_m5u` in platformio.ini
+- [x] Flash 98.6% (1,292,037 / 1,310,720 bytes) su partizione default.csv
+
+### Non implementato (rinviato a versioni future)
+
+- WiFi state machine a 6 stati (documento di design pronto, non implementata)
+- Feedback sonoro buzzer (header pronto, non integrato nel loop)
+- Screen map completa S0-S8 (solo S3 NAV attiva)
+- Bit telemetria Chg/Err/LoRa (riservati, sempre 0)
+
+---
+
+## v1.4 — Prossima versione pianificata
+
+### Priorità alta — Stabilità e partizione
+
+- [ ] **Partizione custom 1.94 MB** — necessaria per future aggiunte (flash attuale al 98.6%)
+- [ ] Verifica stabilità multi-giorno (uptime > 72h)
+- [ ] Fix PARM/UNIT/EQNS duplicati dopo reboot (B5/W3)
+- [ ] Skip invio weather se sensore ENV scollegato (B6)
+
+### WiFi state machine
+
+> Design in `docs/wifi_state_machine.md` e `docs/screen_map.md`
+
+- [ ] FSM WiFi a 6 stati (`WIFI_ST_OFF` default al boot)
+- [ ] Screen map S0→S8 con buzzer feedback
+- [ ] Pagina S1 PROFILI accessibile da menu (non dal boot)
+
+### Web server esteso
+
+- [ ] Pagina `/config` completa: callsign, locator, SSID, passcode, intervalli TX
+- [ ] Profili stazione editabili via web
+- [ ] Accessibile in STA mode e SoftAP (192.168.4.1)
 
 ### Batteria e alimentazione
 
-- [ ] `isOnUsb()`: rileva USB collegata tramite soglia ADC `batVoltage > 4.4f`
-  *(backdrive body-diode FET sincrono SY7088 → vedi `docs/power_analysis.md`)*
-- [ ] `detectChargeState()`: slope algorithm su finestra `batSamples[]`
-- [ ] Bit telemetria **Chg** (bit 5, 0x20): settare se `detectChargeState()==CHARGING && !isOnUsb()`
-- [ ] Bit telemetria **Err** (bit 3, 0x08): settare se sensore ENV in errore (`pressure == 0.0f`)
-- [ ] Telemetria PARM/UNIT: rinominare R1→**LoRa** (sempre 0 fino a v2.0)
-- [ ] **Shutdown critico batteria**: `M5.shutdown()` se `!isOnUsb() && batVoltage < 3.2V`
+- [ ] `isOnUsb()`: soglia ADC `batVoltage > 4.4f`
+- [ ] `detectChargeState()`: slope algorithm
+- [ ] Bit telemetria Chg (0x20), Err (0x08)
+- [ ] Shutdown critico: `M5.shutdown()` se `!isOnUsb() && batVoltage < 3.2V`
 
-### WiFi state machine e screen map
+### Documentazione
 
-> Design documentato in `docs/wifi_state_machine.md`, `docs/ui_button_model.md`, `docs/screen_map.md`
+- [ ] README in inglese (o bilingue)
+- [ ] Traduzione manuale utente in inglese
 
-- [ ] Implementare FSM WiFi a 6 stati (`WIFI_ST_OFF` default al boot)
-- [ ] Screen map aggiornata: S0→S3 NAV diretto (WiFi OFF al boot)
-- [ ] Pagina S1 PROFILI accessibile solo da menu pagina 3
-
-### Web server — configurazione via browser
-
-- [ ] Pagina `/config`: modifica callsign, locator, SSID, passcode, intervalli TX
-- [ ] Profili stazione editabili via web
-- [ ] Accessibile sia in STA mode (IP locale) che in SoftAP (192.168.4.1)
-
-### Bug da chiudere
+### Bug aperti
 
 | # | Problema | Priorità |
 |---|----------|----------|
-| B5 | PARM/UNIT/EQNS ripetuti a ogni reboot (`telemetryDefSent` non in NVS) | Media |
-| B6 | Skip invio weather se sensore ENV non aggiornato/scollegato | Media |
+| B5 | PARM/UNIT/EQNS ripetuti a ogni reboot | Media |
+| B6 | Skip invio weather se sensore ENV non aggiornato | Media |
 | B7 | Commento posizione APRS ridondante | Bassa |
 | B9 | Satelliti BeiDou non conteggiati nel display | Bassa |
-| W2 | Doppio reboot durante handover AP (watchdog?) | Alta |
-| W3 | PARM/UNIT/EQNS duplicati su APRS-IS dopo ogni reboot | Media |
-
-### Mappa bit telemetria (v1.3)
-
-| Bit | Maschera | Label | Semantica | Stato |
-|-----|----------|-------|-----------|-------|
-| 7 | 0x80 | GPS | GPS fix valido (`isValid && isUpdated`) | ✅ |
-| 6 | 0x40 | WiFi | WiFi associato (`WL_CONNECTED`) | ✅ |
-| 5 | 0x20 | Chg | Batteria in carica (slope>0 && !isOnUsb) | ⏳ |
-| 4 | 0x10 | TX | Ultimo pacchetto APRS inviato con successo | ✅ |
-| 3 | 0x08 | Err | Sensore ENV in errore (QMP reset attivo) | ⏳ |
-| 2 | 0x04 | LoRa | Modulo LoRa attivo (sempre 0 fino a v2.0) | ⏳ |
-| 1 | 0x02 | R2 | Riservato | — |
-| 0 | 0x01 | R3 | Riservato | — |
-
----
-
-## v1.4 — Versione finale 1.x: prodotto completo e stabile
-
-La v1.4 chiude il ciclo della versione principale 1. Al termine di questa versione
-la stazione meteorologica è un prodotto completo, affidabile e ben documentato.
-Le versioni successive (v2.x) introdurranno funzionalità di salto qualitativo.
-
-### Bugfix da v1.3
-*Da definire durante i test della v1.3. Questa sezione verrà aggiornata.*
-
-- [ ] TBD — in attesa di sessione di test completa v1.3
-
-### Infrastruttura e affidabilità
-
-- Protezione pre-OTA: la pagina `/update` verifica la presenza di log e richiede
-  download o conferma esplicita prima di accettare il firmware
-- Gestione errori di rete migliorata: riconnessione automatica, timeout, retry con backoff
-- Verifica stabilità multi-giorno
-
-### Miglioramenti interfaccia
-
-- Font selezionabile dall'utente (diversi stili e dimensioni: 8/12/16/24 px)
-- Configurazione font dal portale web / WiFiManager
-- Libreria font estesa (monospace, sans-serif)
-
-### Documentazione (obiettivo principale v1.4)
-
-- **README.md** → riscritto in inglese
-- **docs/release_notes.md** → riscritto in inglese
-- **builds/v1.4/release_notes.md** → inglese
-- **docs/manuale_utente.md** → revisione e pulizia (italiano)
-- Rimozione di tutti i riferimenti a workaround hardware specifici
-- Traduzione opzionale manuale utente in inglese (`docs/user_manual_en.md`)
-  per condivisione con la comunità internazionale
 
 ---
 
@@ -107,50 +92,33 @@ Le versioni successive (v2.x) introdurranno funzionalità di salto qualitativo.
 
 Salto qualitativo dell'applicazione: nuovi hardware, nuove reti, nuove funzionalità
 che trasformano la stazione in un nodo della rete APRS e delle reti meteo globali.
-L'intero contenuto di questa versione può essere rilasciato come v2.0 e poi
-raffinato con calma nelle versioni 2.1, 2.2 ecc.
 
 ### Sensori esterni wireless RF433
 
 - Ricezione dati da sensori meteo wireless 433 MHz (Oregon Scientific, Acurite, ecc.)
 - Decodifica protocolli comuni (temperatura, umidità, pioggia esterna)
 - Sensore effetto Hall per anemometro o pluviometro
-- Integrazione dati nel pacchetto APRS weather report
 - Hardware: M5Stack RF433R, Hall Effect Unit, Hub Grove 1→3
 
 ### iGate / Digipeater LoRa
 
-> **Prerequisito**: mod hardware HAT v1.3 — G13/G14 sul connettore M5-Bus diventano
-> liberi per LoRa UART; Grove Port A (G32/G33) resta libero per RF433.
-
-- Modulo consigliato: EBYTE E32-433T20D o E22-400M30S (SX1278/SX1262, interfaccia UART)
-  collegato su **M5-Bus G13(RX)/G14(TX)** via `Serial1.begin(9600, SERIAL_8N1, 13, 14)`
-- Alternativa SPI: SX1278 Ra-02 su SPI condiviso display (G18/G23/G34) con CS su G13 —
-  più veloce ma richiede serializzazione SPI display+LoRa
+- Modulo EBYTE E32-433T20D o E22-400M30S (UART su M5-Bus G13/G14)
 - Inoltro a APRS-IS (iGate RX)
 - Digipeater locale (ripetizione senza internet)
 - Filtro pacchetti per area/nominativo
-- Visualizzazione stazioni ascoltate su display
-- Hardware: RA-01 (SX1278) SPI o E32-433T UART
 
 ### Integrazione reti meteo alternative
 
-- **CWOP** (Citizen Weather Observer Program): invio dati a cwop.aprs.net:14580, registrazione CW/DW number
-- **Weather Underground**: upload HTTP/HTTPS a wunderground.com, API key + station ID via WiFiManager
-- **MADIS/NOAA**: inoltro automatico verso il sistema MADIS tramite CWOP
-- **PWSweather / AerisWeather**: upload dati via API REST
-- **OpenWeatherMap Station API**: invio dati alla propria stazione OWM registrata
-- **Windy.com**: upload via API stations (station ID + API key)
-- **MQTT broker custom**: pubblicazione dati su topic configurabile (Home Assistant, Node-RED, Grafana)
-- Selezione reti attive da WiFiManager (checkbox per ogni rete)
-- Credenziali e ID stazione per ogni rete salvati in NVS
+- CWOP, Weather Underground, Windy.com, MQTT broker custom
+- Selezione reti attive da web config
+- Credenziali per ogni rete in NVS
 - Invio simultaneo multi-rete con intervalli indipendenti
 
 ### Ordine di implementazione suggerito
 
 1. RF433 — estende la funzione meteo principale, impatto hardware limitato
 2. Multi-rete meteo — estende la connettività, solo software
-3. LoRa iGate/Digipeater — maggiore complessità hardware, impatto su flash e RAM
+3. LoRa iGate/Digipeater — maggiore complessità hardware
 
 ---
 
@@ -158,6 +126,7 @@ raffinato con calma nelle versioni 2.1, 2.2 ecc.
 
 - App BLE per configurazione da smartphone
 - Sensori aggiuntivi I2C (UV, luminosità)
+- Font selezionabile dall'utente (8/12/16/24 px)
 - Deep sleep con wake-up RTC per risparmio estremo
 - Dashboard web locale con grafici storici
 - Integrazione MQTT in parallelo ad APRS
