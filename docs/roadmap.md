@@ -14,6 +14,14 @@
 | v1.2.8 | Bug fixes post-campo (BUG-01..12), boot splash, WiFi round-robin e timeout 8 s | 2026-05-20 |
 | v1.2.9 | Fix GPS→ENV sticky, meteo immediato, allarme batteria critica | 2026-05-20 |
 | v1.3.0 | Port M5Unified, OWM current+forecast, web config /config, 10 pagine display | 2026-05-23 |
+| v1.3.1 | Fix ghosting e-ink + menu emergenza (deep clean, standby) | 2026-05-31 |
+
+---
+
+## v1.3.2 — Prossima patch display
+
+- [ ] B10: Menu emergenza opt.2 "Pulizia display" — dopo deep clean deve tornare alla pagina corrente senza reset
+- [ ] B11: Menu emergenza opt.3 "Standby" — eseguire deep clean prima di andare in bianco
 
 ---
 
@@ -85,6 +93,8 @@
 | B6 | Skip invio weather se sensore ENV non aggiornato | Media |
 | B7 | Commento posizione APRS ridondante | Bassa |
 | B9 | Satelliti BeiDou non conteggiati nel display | Bassa |
+| B10 | Menu emergenza opt.2 "Pulizia display": dopo deep clean fa clearGhosting+updateDisplay che resetta il contesto — deve tornare alla pagina corrente senza reset | Media |
+| B11 | Menu emergenza opt.3 "Standby": non esegue deep clean prima di andare in bianco → standby con ghost | Media |
 
 ---
 
