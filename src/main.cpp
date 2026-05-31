@@ -146,6 +146,7 @@ unsigned long lastStatusTime = 0;
 unsigned long rtDisplayUpdateMs = DISPLAY_UPDATE_MS;  // Configurabile via WiFiManager
 unsigned long rtWeatherIntervalMs = WEATHER_INTERVAL_MS;  // Configurabile
 unsigned long rtStatusIntervalMs = APRS_STATUS_INTERVAL_MS;  // Configurabile
+int einkRefreshCounter = 0;  // Contatore per full refresh anti-ghosting
 unsigned long lastLogTime = 0;
 unsigned long uptimeStart = 0;
 int telemetrySeq = 0;
@@ -491,6 +492,7 @@ void setup() {
     lastTelemetryDefTime = millis();
     lastStatusTime = millis();
     lastLogTime = millis();
+    einkRefreshCounter = EINK_FULL_REFRESH_EVERY - 1;  // Primo refresh nel loop sarà full (anti-ghosting)
 
     Serial.println("[SETUP] Completato!\n");
 }
@@ -573,6 +575,14 @@ void loop() {
         if (portMode == PORT_MODE_ENV) readSensors();
         batVoltage = readBattery();
         coordShowMaidenhead = !coordShowMaidenhead;
+#if defined(USE_M5UNIFIED)
+        // Anti-ghosting: ogni N refresh fa un ciclo nero→bianco che elimina ghosting residuo
+        einkRefreshCounter++;
+        if (einkRefreshCounter >= EINK_FULL_REFRESH_EVERY) {
+            eink_clear_ghosting();  // nero→bianco→wait (pulisce pixel)
+            einkRefreshCounter = 0;
+        }
+#endif
         updateDisplay();
         lastDisplayTime = now;
     }
@@ -611,19 +621,78 @@ void loop() {
         updateDisplay();
         lastDisplayTime = millis();  // BUG-11: evita refresh automatico subito dopo cambio pagina
     }
-    // EXT: long (3s) → menu emergenza WiFi | short → nessuna azione (ui_button_model.md)
+    // EXT: long (3s) → menu emergenza WiFi + full refresh | short → nessuna azione (ui_button_model.md)
     {
         static bool extLongFired = false;
         if (!extLongFired && M5.BtnEXT.pressedFor(3000)) {
             extLongFired = true;
-            showWifiMenu();
-            M5.update();  // Aggiorna stato tasto dopo blocco
-            if (!M5.BtnEXT.isPressed()) extLongFired = false;
+            // Menu emergenza: UP/DOWN per scegliere, MID per confermare, EXT per uscire
+            int menuSel = 0;
+            const int MENU_ITEMS = 3;
+            const char* menuLabels[] = {"WiFi emergenza", "Pulizia display", "Standby display"};
+            bool menuDone = false;
+            while (!menuDone) {
+#if defined(BOARD_COREINK)
+                M5.M5Ink.clear();
+                mainSprite.clear();
+                mainSprite.drawString(5, 0, "MENU EMERGENZA", &fonts::AsciiFont8x16);
+                mainSprite.drawString(5, 20, "UP/DN:scegli MID:ok", &fonts::AsciiFont8x16);
+                mainSprite.drawString(5, 36, "EXT:esci", &fonts::AsciiFont8x16);
+                for (int i = 0; i < MENU_ITEMS; i++) {
+                    char line[32];
+                    snprintf(line, sizeof(line), "%s %s", (i == menuSel) ? ">" : " ", menuLabels[i]);
+                    mainSprite.drawString(5, 60 + i * 20, line, &fonts::AsciiFont8x16);
+                }
+                mainSprite.pushSprite();
+#endif
+                // Attendi input
+                while (true) {
+                    M5.update();
+                    if (M5.BtnUP.wasPressed()) { menuSel = (menuSel - 1 + MENU_ITEMS) % MENU_ITEMS; break; }
+                    if (M5.BtnDOWN.wasPressed()) { menuSel = (menuSel + 1) % MENU_ITEMS; break; }
+                    if (M5.BtnMID.wasPressed()) { menuDone = true; break; }
+                    if (M5.BtnEXT.wasPressed()) { menuSel = -1; menuDone = true; break; }
+                    delay(50);
+                    esp_task_wdt_reset();
+                }
+            }
+            M5.update();
+            if (menuSel == 0) {
+                // WiFi emergenza
+                showWifiMenu();
+            } else if (menuSel == 1) {
+                // Pulizia display: 10 cicli nero(1s) → bianco(1s)
+#if defined(USE_M5UNIFIED)
+                eink_deep_clean(10);
+#endif
+            } else if (menuSel == 2) {
+                // Standby display: nero → bianco → resta bianco fino a joystick
+#if defined(USE_M5UNIFIED)
+                M5.Display.fillScreen(TFT_BLACK);
+                M5.Display.display();
+                M5.Display.waitDisplay();
+                delay(1000);
+                M5.Display.fillScreen(TFT_WHITE);
+                M5.Display.display();
+                M5.Display.waitDisplay();
+#endif
+                // Attendi qualsiasi tasto per uscire dallo standby
+                while (true) {
+                    M5.update();
+                    if (M5.BtnUP.wasPressed() || M5.BtnDOWN.wasPressed() ||
+                        M5.BtnMID.wasPressed() || M5.BtnEXT.wasPressed()) break;
+                    delay(100);
+                    esp_task_wdt_reset();
+                }
+            }
+            // Ritorna alla pagina normale
+#if defined(USE_M5UNIFIED)
+            eink_clear_ghosting();
+#endif
             updateDisplay();
             lastDisplayTime = millis();
         }
         if (M5.BtnEXT.wasReleased()) {
-            // EXT short: nessuna azione in navigazione (per il modello ui_button_model.md)
             extLongFired = false;
         }
     }

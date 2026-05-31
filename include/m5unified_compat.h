@@ -53,11 +53,35 @@ public:
     }
 };
 
-// --- E-ink fast refresh ---
-// Chiamare in setup() dopo M5.begin() per abilitare partial/fast refresh
-// invece del full refresh di default (molto più lento)
+// --- E-ink refresh modes ---
+// epd_quality: full refresh con inversione completa (~0.8s)
+// Usato come modo permanente per evitare ghosting.
+
 inline void m5unified_setup_eink() {
-    M5.Display.setEpdMode(epd_mode_t::epd_fast);
+    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+}
+
+// Pulizia profonda display: cicli nero(1s) → bianco(1s) ripetuti N volte.
+// Forza la scarica completa della carica residua accumulata nei pixel.
+// Da usare on-demand (menu emergenza) quando il display ha ghosting persistente.
+inline void eink_deep_clean(int cycles = 10) {
+    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    for (int i = 0; i < cycles; i++) {
+        M5.Display.fillScreen(TFT_BLACK);
+        M5.Display.display();
+        M5.Display.waitDisplay();
+        delay(1000);
+        M5.Display.fillScreen(TFT_WHITE);
+        M5.Display.display();
+        M5.Display.waitDisplay();
+        delay(1000);
+    }
+}
+
+inline void eink_clear_ghosting() {
+    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    M5.Display.clearDisplay();
+    M5.Display.waitDisplay();
 }
 
 // --- Button name mapping ---

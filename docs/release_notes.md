@@ -2,6 +2,30 @@
 
 ---
 
+## v1.3.1 — Fix ghosting + menu emergenza display (2026-05-31)
+
+Fix ghosting e-ink + menu emergenza con pulizia display e standby.
+
+**Issue**: [#3](https://github.com/andrea-dandrea/coreink-meteo/issues/3)  
+**Build**: `coreink_lite_m5u` — Flash 98.7% · RAM ~17.6%
+
+### Causa ghosting
+
+`epd_mode_t::epd_fast` salta il ciclo di inversione completa dei pixel. Dopo giorni di uso, la carica residua si accumula creando ghosting visibile.
+
+### Fix
+
+| Modifica | Dettaglio |
+|----------|-----------|
+| Modalità `epd_quality` permanente | Niente più alternanza fast/quality — sempre quality |
+| `clearDisplay()` periodico | Ogni 5 aggiornamenti automatici → ciclo nero→bianco visibile |
+| Intervallo default 5 min | `DISPLAY_UPDATE_MS` da 60s a 300s (configurabile via web UI) |
+| Menu emergenza (EXT long 3s) | 3 opzioni: WiFi / Pulizia display (10 cicli) / Standby |
+| Deep clean | 10 cicli nero(1s)→bianco(1s) per rimuovere ghosting accumulato |
+| Standby display | Schermo bianco fino a pressione tasto |
+
+---
+
 ## v1.3.0 — Port M5Unified + OpenWeatherMap + Previsioni (2026-05-23)
 
 Port completo alla libreria M5Unified (v0.2.15) con integrazione dati meteo da OpenWeatherMap (current + forecast 5-day/3h).

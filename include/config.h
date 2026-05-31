@@ -137,7 +137,8 @@ const StationProfile profiles[NUM_PROFILES] = {
 #define WIFI_MENU_TIMEOUT_S 60       // Timeout schermata selezione WiFi al boot (S2)
 
 // === Display ===
-#define DISPLAY_UPDATE_MS 60000   // Aggiornare il display ogni minuto
+#define DISPLAY_UPDATE_MS 300000  // Aggiornare il display ogni 5 minuti (ridotto per longevità e-ink)
+#define EINK_FULL_REFRESH_EVERY 5 // Full refresh (anti-ghosting) ogni N aggiornamenti
 #ifndef NUM_PAGES
 #define NUM_PAGES 9               // Numero totale di pagine display
 #endif
